@@ -1,0 +1,1402 @@
+:root {
+  --bg: #0b0e14;
+  --bg-soft: #0f131b;
+  --panel: #141922;
+  --panel-2: #1a2029;
+  --panel-3: #212936;
+  --line: #262d3a;
+  --line-soft: #1d232e;
+  --text: #e8edf4;
+  --muted: #97a2b3;
+  --faint: #6b7688;
+  --accent: #5aa9ff;
+  --green: #4bc26a;
+  --amber: #e0a231;
+  --violet: #b98cff;
+  --red: #ff6b60;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f6f9;
+    --bg-soft: #eef1f5;
+    --panel: #ffffff;
+    --panel-2: #f3f5f8;
+    --panel-3: #e8ecf1;
+    --line: #dde2e9;
+    --line-soft: #e8ecf1;
+    --text: #161c24;
+    --muted: #5b6675;
+    --faint: #8b95a3;
+    --accent: #0f6fe0;
+    --green: #1a8c40;
+    --amber: #96660a;
+    --violet: #7546d6;
+    --red: #d02b1f;
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px -14px rgba(16, 24, 40, 0.24);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* O `display` do UA para [hidden] perde de qualquer regra de autor com display
+   próprio (#drawer é flex). Sem isto, esconder pelo atributo não surte efeito. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- topo ---------- */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  height: 56px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.tally {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: 13px;
+}
+
+nav span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+nav button {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+nav button:hover {
+  background: var(--panel-2);
+}
+
+main {
+  padding: 28px 24px 60px;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+/* ---------- visão geral ---------- */
+
+.section {
+  margin-bottom: 36px;
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.section-head .n {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 0 7px;
+  line-height: 17px;
+}
+
+.section-head p {
+  margin: 0 0 0 auto;
+  color: var(--faint);
+  font-size: 12.5px;
+  text-align: right;
+}
+
+/* O `min(320px, 100%)` é o que impede o transbordo: numa tela de 360px o card pediria
+   320px + padding e empurraria a página para o lado. Com ele, o card cede primeiro. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 14px;
+}
+
+.effort {
+  position: relative;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 16px 14px;
+  cursor: pointer;
+  transition: border-color 0.14s, transform 0.14s, box-shadow 0.14s;
+  /* Coluna flexível em vez de linhas fixas: o resumo é opcional e o card tem de
+     fechar igual com ele e sem ele. Quem estica é `.chips`, que empurra `.docs`
+     para a base. */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 148px;
+  box-shadow: var(--shadow);
+}
+
+.effort::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--line);
+  transition: background 0.14s;
+}
+
+.effort:hover,
+.effort:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 14px 30px -16px rgba(0, 0, 0, 0.7);
+  outline: none;
+}
+
+.effort:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.effort:hover::before,
+.effort:focus-visible::before {
+  background: var(--accent);
+}
+
+.effort.is-archivable::before {
+  background: var(--green);
+}
+
+.effort.is-archived {
+  box-shadow: none;
+  background: var(--bg-soft);
+}
+
+.effort.is-archived h3 {
+  color: var(--muted);
+}
+
+.effort-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.effort h3 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  word-break: break-word;
+}
+
+.count {
+  font-family: var(--mono);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.count b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.bar {
+  height: 3px;
+  border-radius: 99px;
+  background: var(--panel-3);
+  overflow: hidden;
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--green);
+  transition: width 0.3s ease;
+}
+
+/* O título humano do map.md/PRD.md. O slug nomeia; a lede diz do que se trata. */
+.lede {
+  margin: -4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-content: flex-start;
+  flex: 1;
+}
+
+/* ---------- popup de resumo ---------- */
+
+.peek {
+  position: fixed;
+  z-index: 50;
+  width: min(420px, calc(100vw - 32px));
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.28), 0 20px 44px -18px rgba(0, 0, 0, 0.75);
+  /* O popup acompanha o cursor até o card; capturar o mouse faria o hover piscar. */
+  pointer-events: none;
+  animation: fade 0.12s ease;
+}
+
+.peek h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.peek p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.peek-issues {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.peek-issues .more {
+  list-style: none;
+  margin-left: -18px;
+  color: var(--faint);
+}
+
+.peek-foot {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-soft);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.docs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ---------- scratchpads de sessão ---------- */
+
+.navlink {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.navlink:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
+.pad {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: var(--shadow);
+}
+
+.pad h3 {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pad-when {
+  color: var(--faint);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.file {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  margin: 0 -8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.file:hover {
+  background: var(--panel-2);
+}
+
+.fname {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file:hover .fname {
+  color: var(--accent);
+}
+
+.fsize {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- copiar ----------
+
+   O botão vive no DOM sempre — escondê-lo com `display:none` até o hover o tiraria
+   da ordem de tabulação, e quem navega por teclado nunca o alcançaria. Some pela
+   opacidade, aparece no hover do container ou quando recebe foco. */
+
+.copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  font: 500 11px/1.5 var(--mono);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.copy .ico::before {
+  content: "⧉";
+  font-size: 12px;
+}
+
+/* O ✓ confirma na própria affordance: com vários botões na tela, um toast no rodapé
+   não diz *qual* deles copiou. */
+.copy.done {
+  opacity: 1;
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+.copy.done .ico::before {
+  content: "✓";
+}
+
+:where(.effort, .card, .file, .pad, .prompt, .drawer-head, .actionbar, nav):hover .copy {
+  opacity: 0.7;
+}
+
+.copy:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+
+.copy:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Com rótulo é ação de primeira classe, não affordance de hover: fica sempre visível. */
+.copy.labelled {
+  opacity: 1;
+  padding: 5px 9px;
+  border-color: var(--line);
+  background: var(--panel-2);
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.copy.labelled > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: none) {
+  .copy {
+    opacity: 1;
+  }
+}
+
+/* ---------- prompts de skill ----------
+
+   O comando aparece literal e é o próprio alvo da cópia: você cola o que leu. */
+
+.prompts {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.prompt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 10px 9px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.prompt.primary {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.prompt code {
+  font: 12.5px/1.5 var(--mono);
+  color: var(--text);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.prompt .hint {
+  flex: 1;
+  min-width: 0;
+  color: var(--faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .prompt {
+    flex-wrap: wrap;
+  }
+  .prompt .hint {
+    flex-basis: 100%;
+  }
+}
+
+#drawer-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+#drawer-actions .prompts {
+  margin-bottom: 0;
+  width: 100%;
+}
+
+/* Na gaveta o comando é longo (mapa + ticket): empilhar dá largura a ele em vez de
+   espremer a dica contra a borda. */
+#drawer-actions .prompt {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+#drawer-actions .prompt code {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+#drawer-actions .prompt .copy {
+  margin-left: auto;
+}
+
+/* ---------- rótulos de status ---------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 19px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--panel-2);
+  white-space: nowrap;
+}
+
+.chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.chip.plain::before {
+  display: none;
+}
+
+.chip[data-s^="needs"] {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 32%, transparent);
+  background: color-mix(in srgb, var(--amber) 10%, var(--panel-2));
+}
+
+.chip[data-s^="ready"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+}
+
+.chip[data-s="claimed"],
+.chip[data-s="partial"] {
+  color: var(--violet);
+  border-color: color-mix(in srgb, var(--violet) 32%, transparent);
+  background: color-mix(in srgb, var(--violet) 10%, var(--panel-2));
+}
+
+.chip[data-s="resolved"],
+.chip[data-s="done"] {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, var(--panel-2));
+}
+
+.chip[data-s="wontfix"] {
+  color: var(--faint);
+}
+
+.chip[data-s^="?"] {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 42%, transparent);
+  background: color-mix(in srgb, var(--red) 12%, var(--panel-2));
+}
+
+/* ---------- kanban ---------- */
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .board {
+    grid-template-columns: 1fr;
+  }
+}
+
+.col {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  min-height: 150px;
+}
+
+.col > header {
+  all: unset;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px 12px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.col > header span:last-child {
+  font-family: var(--mono);
+  color: var(--faint);
+  background: var(--panel-2);
+  border-radius: 99px;
+  padding: 0 6px;
+  line-height: 17px;
+  letter-spacing: 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  box-shadow: var(--shadow);
+  transition: border-color 0.12s, transform 0.12s;
+}
+
+.card:hover,
+.card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.card:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.card.is-blocked {
+  border-left: 2px solid var(--red);
+}
+
+.card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.card-title > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.card-title b {
+  font-family: var(--mono);
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 500;
+  margin-right: 6px;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.card-meta .copy {
+  margin-left: auto;
+}
+
+.blocked-tag {
+  font-size: 11px;
+  color: var(--red);
+}
+
+/* ---------- barra de ação do esforço ---------- */
+
+.actionbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 13px 16px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow);
+}
+
+.actionbar.ready {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
+  background: color-mix(in srgb, var(--green) 7%, var(--panel));
+}
+
+.actionbar p {
+  margin: 0 auto 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+button.act {
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--mono);
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+button.act:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel-2));
+}
+
+button.act.primary {
+  font-family: var(--sans);
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+button.act.primary:hover {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+/* ---------- gaveta ---------- */
+
+#scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 9;
+  animation: fade 0.16s ease;
+}
+
+/* A largura é uma variável porque o usuário a arrasta: o JS escreve `--drawer-w` no
+   :root e o CSS obedece. O `min()` com `94vw` mantém a gaveta dentro da tela mesmo
+   quando a janela encolhe depois do arrasto. */
+#drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(var(--drawer-w, 780px), 94vw);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -24px 0 60px -30px rgba(0, 0, 0, 0.8);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  animation: slide 0.18s ease;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+.drawer-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* O título é o que estica; os dois botões ficam nas pontas. */
+.drawer-head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.drawer-head h2 {
+  margin: 4px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+/* Link entre documentos do esforço: sublinhado, porque é navegação e não cópia. */
+.doclink {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.doclink:hover,
+.doclink:focus-visible {
+  text-decoration-color: var(--accent);
+  outline: none;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+button.icon {
+  background: none;
+  border: 0;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s, color 0.12s;
+}
+
+button.icon:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+/* A alça de resize: 8px de área agarrável sobre a borda esquerda da gaveta. Fina o
+   bastante para não roubar clique do conteúdo, larga o bastante para o mouse pegar. */
+#drawer-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+#drawer-grip::before {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+#drawer-grip:hover::before,
+#drawer.resizing #drawer-grip::before {
+  background: var(--accent);
+}
+
+/* Durante o arrasto, nada de seleção de texto nem de hover atravessando o cursor. */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+
+/* Sem `.md` o corpo é literal: rascunho de agente, log, JSON — texto que só faz
+   sentido byte a byte. Com `.md`, vira documento. */
+#drawer-body {
+  margin: 0;
+  padding: 22px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--muted);
+  flex: 1;
+}
+
+/* ---------- markdown renderizado ---------- */
+
+/* Precisa do id: `#drawer-body` (0-1-0-0) venceria `.md` (0-0-1-0) e o documento
+   inteiro sairia monoespaçado, com os `\n` entre blocos virando linhas em branco. */
+#drawer-body.md {
+  white-space: normal;
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 26px 0 10px;
+  line-height: 1.35;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.md h1 {
+  font-size: 19px;
+}
+
+.md h2 {
+  font-size: 15.5px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+}
+
+.md h3 {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.md h4,
+.md h5,
+.md h6 {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.md p {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.md strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.md li {
+  margin-bottom: 5px;
+}
+
+.md li.nested {
+  margin-left: 16px;
+  list-style-type: circle;
+}
+
+/* Checkbox de acceptance criteria: o marcador diz o estado, sem depender do texto. */
+.md li[data-task] {
+  list-style: none;
+  position: relative;
+}
+
+.md li[data-task]::before {
+  position: absolute;
+  left: -20px;
+  font-family: var(--mono);
+}
+
+.md li[data-task="open"]::before {
+  content: "☐";
+  color: var(--faint);
+}
+
+.md li[data-task="done"]::before {
+  content: "☑";
+  color: var(--green);
+}
+
+.md li[data-task="done"] {
+  color: var(--faint);
+}
+
+.md blockquote {
+  margin: 0 0 12px;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--line);
+  color: var(--faint);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 22px 0;
+}
+
+.md a {
+  color: var(--accent);
+}
+
+.md code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--text);
+}
+
+.md pre {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+
+.md pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* A tabela rola dentro do próprio contêiner: a gaveta não pode rolar na horizontal. */
+.md .tablewrap {
+  overflow-x: auto;
+  margin: 0 0 14px;
+}
+
+.md table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+  color: var(--muted);
+}
+
+.md th {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- cabeçalho do documento ---------- */
+
+.md .meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.md .meta-row {
+  display: contents;
+}
+
+.md .meta-k {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 22px;
+}
+
+/* Fluxo normal, não flex: o `Blocked by:` é uma frase com chips dentro, e num flex
+   cada pedaço vira um item solto — a vírgula órfã numa linha, a justificativa noutra. */
+.md .meta-v {
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: var(--muted);
+  min-width: 0;
+}
+
+/* ---------- alvos do documento ---------- */
+
+/* Caminho de arquivo: clicar copia. Parece código porque é código — mas responde. */
+.ref {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--text);
+  cursor: copy;
+  transition: border-color 0.12s, color 0.12s;
+  word-break: break-all;
+}
+
+.ref:hover,
+.ref:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+}
+
+.ref.done {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.ref.done::after {
+  content: " ✓";
+}
+
+/* Referência de issue (`Blocked by:`): clicar abre a issue na própria gaveta. */
+.issueref {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--red) 12%, var(--panel-2));
+  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line));
+  border-radius: 5px;
+  padding: 1px 7px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.issueref:hover,
+.issueref:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+  outline: none;
+}
+
+/* A justificativa que acompanha o `Blocked by:` — prosa, e é para ser lida. */
+.meta-note {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* Bloqueio já resolvido não é bloqueio: some o vermelho. */
+.issueref[data-s="resolved"],
+.issueref[data-s="done"],
+.issueref[data-s="wontfix"] {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--faint);
+}
+
+/* ---------- toast ---------- */
+
+#toast {
+  position: fixed;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  z-index: 20;
+  box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.55);
+  animation: slide-up 0.16s ease;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translate(-50%, 8px);
+    opacity: 0;
+  }
+}
+
+.empty {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 10px 4px;
+  text-align: center;
+}
+
+/* ---------- telas estreitas ---------- */
+
+/* O que quebra primeiro é o topo: quatro elementos numa linha de 56px de altura. */
+@media (max-width: 900px) {
+  header {
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
+    padding: 10px 16px;
+    gap: 8px 12px;
+  }
+
+  /* O contador é a informação mais dispensável do topo — sai antes do resto apertar. */
+  .tally {
+    display: none;
+  }
+
+  nav {
+    flex-basis: 100%;
+    order: 3;
+  }
+
+  main {
+    padding: 20px 16px 48px;
+  }
+
+  .section-head {
+    flex-wrap: wrap;
+  }
+
+  /* A gaveta ocupa a tela: sobrar 6% de board atrás não serve para nada, e a largura
+     arrastada (`--drawer-w`) deixa de fazer sentido quando não há espaço para arrastar. */
+  #drawer {
+    width: 100vw;
+  }
+
+  #drawer-grip {
+    display: none;
+  }
+
+  .drawer-head,
+  #drawer-actions,
+  #drawer-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+/* Sem hover não há popup — o dispositivo não tem como mostrá-lo antes do toque. O
+   card já traz a lede; quem tocar entra no esforço e lê o documento. */
+@media (hover: none) {
+  .peek {
+    display: none;
+  }
+}

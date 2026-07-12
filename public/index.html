@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>scratch board</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>"
+    />
+  </head>
+  <body>
+    <header>
+      <h1><span class="dot"></span> scratch</h1>
+      <nav id="crumbs"></nav>
+      <div class="spacer"></div>
+      <span id="tally" class="tally"></span>
+      <a id="pads-link" class="navlink" href="#/pads">scratchpads</a>
+    </header>
+
+    <main id="view"></main>
+
+    <aside id="drawer" hidden>
+      <!-- Arraste para redimensionar; duplo clique volta à largura padrão. -->
+      <div id="drawer-grip" role="separator" aria-orientation="vertical" title="Arraste para redimensionar"></div>
+      <div class="drawer-head">
+        <!-- Só aparece quando você seguiu um link de dentro do documento. -->
+        <button id="drawer-back" class="icon" title="Voltar (Esc)" hidden>←</button>
+        <div>
+          <span id="drawer-eyebrow" class="eyebrow"></span>
+          <h2 id="drawer-title"></h2>
+        </div>
+        <button id="drawer-close" class="icon" title="Fechar (Esc)">✕</button>
+      </div>
+      <div id="drawer-actions" hidden></div>
+      <!-- Sem `.md` é literal e monoespaçado (rascunho, log, JSON); com `.md`, documento. -->
+      <div id="drawer-body"></div>
+    </aside>
+    <div id="scrim" hidden></div>
+
+    <div id="toast" hidden></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

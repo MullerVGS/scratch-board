@@ -1,0 +1,16 @@
+services:
+  scratch-board:
+    build: .
+    container_name: scratch-board
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7777:7777"
+    volumes:
+      # Fonte da verdade. Read-only: o board é uma projeção — quem escreve nos .md
+      # são você e as skills. O mount é a garantia, não só a intenção.
+      - ../.scratch:/workspace/.scratch:ro
+      # Scratchpads de sessão dos agentes. Read-only: é rascunho alheio, e efêmero.
+      - /tmp/claude-0/-root-projetos:/workspace/pads:ro
+      # Iterar sem rebuild: o servidor não tem build step.
+      - ./server.js:/app/server.js:ro
+      - ./public:/app/public:ro
