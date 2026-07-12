@@ -6,6 +6,7 @@ Um esforço é uma pasta com um `PRD.md`, um `map.md` e issues numeradas. O boar
 
 - **Esforços** com título e resumo, para lembrar do que se trata sem abrir o arquivo.
 - **Issues** com status, bloqueios e o `Blocked by:` como link para a issue bloqueante.
+- **Grafo de dependências** por esforço: as setas do `Blocked by:` com a profundidade no eixo X, em vez do tempo que o `.scratch/` não tem. A primeira coluna é a frontier; o que já fechou fica esmaecido, mostrando o que soltou o resto.
 - **Gaveta** que renderiza o markdown, navega pelos links relativos entre documentos e volta pela trilha.
 - **Comando por estado**: cada esforço e cada issue mostram, pronto para copiar, o comando que os move — e o que está bloqueado não mostra nenhum.
 

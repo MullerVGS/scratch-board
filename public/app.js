@@ -244,6 +244,7 @@ function effortCard(e, archived = false) {
         <span class="count"><b>${e.closed}</b>/${e.total}</span>
       </div>
       ${e.title ? `<p class="lede">${esc(e.title)}</p>` : ''}
+      ${e.blurb ? `<p class="blurb">${esc(e.blurb)}</p>` : ''}
       <div class="bar"><i style="width:${pct}%"></i></div>
       <div class="chips">${statusChips(e.issues) || '<span class="chip plain">sem issues</span>'}</div>
       ${e.docs.length ? `<div class="docs">${e.docs.map((d) => esc(d.name)).join(' · ')}</div>` : ''}
@@ -347,6 +348,24 @@ function openIssue(issue, effort, archived, nav = false) {
   )
 }
 
+// ---------- dependências ----------
+
+/**
+ * As referências do `Blocked by:` são locais ao esforço (`01`, `02`) — o grafo de um
+ * esforço nunca alcança outro. Uma referência a issue inexistente é descartada aqui:
+ * não há nó para ligar, e o servidor já não a conta como bloqueio.
+ */
+function depsOf(issue, byNumber) {
+  return issue.blockedBy
+    .map((d) => ({ ...d, dep: byNumber.get(d.number) }))
+    .filter((d) => d.dep && d.dep !== issue)
+}
+
+const numberIndex = (issues) => new Map(issues.map((i) => [i.number.padStart(2, '0'), i]))
+
+const openDeps = (issue, effort) =>
+  depsOf(issue, numberIndex(effort.issues)).filter((d) => !d.dep.closed)
+
 function issueCard(issue, effort, archived) {
   const title = cleanTitle(issue)
   const card = el(`
@@ -355,7 +374,7 @@ function issueCard(issue, effort, archived) {
       <div class="card-meta">
         <span class="chip" data-s="${esc(issue.status)}">${esc(issue.status)}</span>
         ${issue.type ? `<span class="chip">${esc(issue.type)}</span>` : ''}
-        ${issue.blocked ? `<span class="blocked-tag">bloqueada por ${esc(issue.blockedBy.join(', '))}</span>` : ''}
+        ${issue.blocked ? `<span class="blocked-tag">bloqueada por ${esc(openDeps(issue, effort).map((d) => d.number).join(', '))}</span>` : ''}
       </div>
     </article>
   `)
@@ -372,7 +391,184 @@ function issueCard(issue, effort, archived) {
   return card
 }
 
-function renderEffort(slug, archived) {
+// ---------- grafo de dependências ----------
+
+const NODE_W = 236
+const NODE_H = 80
+const GAP_X = 92
+const GAP_Y = 18
+const PAD = 18
+
+/**
+ * Um Gantt gasta o eixo X com tempo; este grafo gasta com **profundidade**.
+ *
+ * O `.scratch/` não tem data de início nem duração, e inventá-las à mão em cada `.md`
+ * seria criar um estado que ninguém mantém — datas podres mentem com mais confiança
+ * que a ausência delas. Mas as setas de um Gantt não precisam de tempo: elas são as
+ * arestas do `Blocked by:`, e essas existem. Trocado o eixo, a camada 0 passa a ser a
+ * frontier — o que dá para atacar agora — e cada coluna à direita é o que aquilo
+ * destrava.
+ *
+ * A camada é o **maior** caminho até uma issue sem dependência, não o menor: com o
+ * menor, um nó apareceria à esquerda de algo que ele espera, e a seta andaria para
+ * trás. Ciclo não deveria existir num `Blocked by:`, mas se existir a aresta de volta
+ * é ignorada em vez de estourar a pilha — o board mostra o que o arquivo diz, e um
+ * arquivo pode estar errado.
+ */
+function layerize(issues, byNumber) {
+  const layer = new Map()
+  const visiting = new Set()
+
+  const depth = (issue) => {
+    if (layer.has(issue)) return layer.get(issue)
+    if (visiting.has(issue)) return 0 // ciclo: a aresta que fecha o laço não conta
+    visiting.add(issue)
+    const d = depsOf(issue, byNumber).reduce((max, { dep }) => Math.max(max, depth(dep) + 1), 0)
+    visiting.delete(issue)
+    layer.set(issue, d)
+    return d
+  }
+
+  issues.forEach(depth)
+  return layer
+}
+
+/**
+ * Dentro da camada, a ordem é o baricentro das dependências: um nó fica na altura da
+ * média dos que o bloqueiam. É o que evita que as curvas se cruzem sem necessidade —
+ * e como as camadas são resolvidas da esquerda para a direita, quem serve de âncora já
+ * tem linha quando é consultado. A camada 0 não tem âncora nenhuma: ordena por número.
+ */
+function graphLayout(issues, byNumber) {
+  const layer = layerize(issues, byNumber)
+  const columns = []
+  for (const issue of issues) (columns[layer.get(issue)] ??= []).push(issue)
+
+  const row = new Map()
+  for (const [li, column] of columns.entries()) {
+    const bary = (issue) => {
+      const rows = depsOf(issue, byNumber).map(({ dep }) => row.get(dep)).filter((r) => r !== undefined)
+      return rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0
+    }
+    column.sort((a, b) => (li ? bary(a) - bary(b) : 0) || a.number.localeCompare(b.number))
+    column.forEach((issue, ri) => row.set(issue, ri))
+  }
+
+  const at = (issue) => ({
+    x: PAD + layer.get(issue) * (NODE_W + GAP_X),
+    y: PAD + row.get(issue) * (NODE_H + GAP_Y),
+  })
+  const height = Math.max(...columns.map((c) => c.length)) * (NODE_H + GAP_Y) - GAP_Y + PAD * 2
+
+  return { at, columns, width: columns.length * (NODE_W + GAP_X) - GAP_X + PAD * 2, height }
+}
+
+const svg = (tag, attrs) => {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag)
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v)
+  return node
+}
+
+/** Sai da borda direita do bloqueante e entra na esquerda do bloqueado, sempre. */
+function edgePath(from, to) {
+  const x1 = from.x + NODE_W
+  const y1 = from.y + NODE_H / 2
+  const x2 = to.x
+  const y2 = to.y + NODE_H / 2
+  const bend = Math.max(GAP_X * 0.55, (x2 - x1) * 0.4)
+  return `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`
+}
+
+function graphNode(issue, effort, archived, at) {
+  const title = cleanTitle(issue)
+  const node = el(`
+    <article class="gnode ${issue.closed ? 'is-closed' : ''} ${issue.blocked ? 'is-blocked' : ''}"
+             style="left:${at.x}px; top:${at.y}px; width:${NODE_W}px; height:${NODE_H}px"
+             tabindex="0" role="button">
+      <div class="gnode-title"><b>${esc(issue.number)}</b><span>${esc(title)}</span></div>
+      <span class="chip" data-s="${esc(issue.status)}">${esc(issue.status)}</span>
+    </article>
+  `)
+  node.onclick = () => openIssue(issue, effort, archived)
+  node.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault()
+      openIssue(issue, effort, archived)
+    }
+  }
+  return node
+}
+
+/**
+ * O grafo mostra as issues fechadas junto das abertas: é a história de como se chegou
+ * na frontier, e sem ela uma issue destravada apareceria solta, sem explicar o que a
+ * soltou. Elas entram esmaecidas, e a aresta que já foi cumprida entra tracejada — o
+ * que ainda segura alguém é o que fica sólido e vermelho.
+ */
+function renderGraph(effort, archived) {
+  const wrap = el('<div class="graph"></div>')
+  if (!effort.issues.length) {
+    wrap.append(el('<p class="empty">Esforço sem issues — não há dependência a desenhar.</p>'))
+    return wrap
+  }
+
+  const byNumber = numberIndex(effort.issues)
+  const { at, width, height } = graphLayout(effort.issues, byNumber)
+
+  const canvas = el(`<div class="graph-canvas" style="width:${width}px; height:${height}px"></div>`)
+  const edges = svg('svg', { class: 'graph-edges', width, height })
+
+  // Um marcador por classe de aresta. `el()` monta HTML, e um `<defs>` construído ali
+  // não estaria no namespace SVG — o navegador o aceitaria e o ignoraria, e as setas
+  // sumiriam sem erro nenhum. Daí o `svg()` em cada nó.
+  const defs = svg('defs', {})
+  for (const kind of ['blocking', 'satisfied']) {
+    const marker = svg('marker', {
+      id: `arrow-${kind}`,
+      viewBox: '0 0 8 8',
+      refX: 7,
+      refY: 4,
+      markerWidth: 6,
+      markerHeight: 6,
+      orient: 'auto-start-reverse',
+    })
+    marker.append(svg('path', { d: 'M 0 0 L 8 4 L 0 8 z', class: `arrow ${kind}` }))
+    defs.append(marker)
+  }
+  edges.append(defs)
+
+  let drawn = 0
+  for (const issue of effort.issues) {
+    for (const { dep, note, raw } of depsOf(issue, byNumber)) {
+      const blocking = !dep.closed
+      const path = svg('path', {
+        class: `gedge ${blocking ? 'blocking' : 'satisfied'}`,
+        d: edgePath(at(dep), at(issue)),
+        'marker-end': `url(#arrow-${blocking ? 'blocking' : 'satisfied'})`,
+      })
+      // A prosa depois do número é a justificativa do bloqueio — o hover devolve ela.
+      const tip = svg('title', {})
+      tip.textContent = note ? `${dep.number} → ${issue.number}: ${note}` : `${dep.number} → ${issue.number}`
+      path.append(tip)
+      path.setAttribute('data-raw', raw)
+      edges.append(path)
+      drawn++
+    }
+  }
+
+  canvas.append(edges)
+  for (const issue of effort.issues) canvas.append(graphNode(issue, effort, archived, at(issue)))
+  wrap.append(canvas)
+
+  if (!drawn) {
+    wrap.prepend(
+      el('<p class="graph-note">Nenhuma issue deste esforço declara <code>Blocked by:</code> — o grafo é uma coluna só.</p>'),
+    )
+  }
+  return wrap
+}
+
+function renderEffort(slug, archived, graph = false) {
   const pool = archived ? board.archived : board.efforts
   const effort = pool.find((e) => e.slug === slug)
   if (!effort) return (location.hash = '')
@@ -416,19 +612,37 @@ function renderEffort(slug, archived) {
   const strip = promptStrip(effortPrompts(effort, archived))
   if (strip) view.append(strip)
 
-  const boardEl = el('<div class="board"></div>')
-  for (const col of board.columns) {
-    const issues = effort.issues.filter((i) => i.column === col.id)
-    const node = el(`
-      <div class="col">
-        <header><span>${esc(col.label)}</span><span>${issues.length}</span></header>
-      </div>
-    `)
-    if (!issues.length) node.append(el('<div class="empty">—</div>'))
-    for (const issue of issues) node.append(issueCard(issue, effort, archived))
-    boardEl.append(node)
+  // A visão escolhida vive no hash, não em `localStorage`: é onde já vive o resto da
+  // navegação, e um link para o grafo de um esforço passa a ser colável.
+  const base = `#/${archived ? 'archive/' : ''}${slug}`
+  const swap = el(`
+    <div class="viewswitch" role="tablist">
+      <button role="tab" class="${graph ? '' : 'on'}" aria-selected="${!graph}">lista</button>
+      <button role="tab" class="${graph ? 'on' : ''}" aria-selected="${graph}">grafo</button>
+    </div>
+  `)
+  const [listBtn, graphBtn] = swap.querySelectorAll('button')
+  listBtn.onclick = () => (location.hash = base)
+  graphBtn.onclick = () => (location.hash = `${base}/grafo`)
+  view.append(swap)
+
+  if (graph) {
+    view.append(renderGraph(effort, archived))
+  } else {
+    const boardEl = el('<div class="board"></div>')
+    for (const col of board.columns) {
+      const issues = effort.issues.filter((i) => i.column === col.id)
+      const node = el(`
+        <div class="col">
+          <header><span>${esc(col.label)}</span><span>${issues.length}</span></header>
+        </div>
+      `)
+      if (!issues.length) node.append(el('<div class="empty">—</div>'))
+      for (const issue of issues) node.append(issueCard(issue, effort, archived))
+      boardEl.append(node)
+    }
+    view.append(boardEl)
   }
-  view.append(boardEl)
 
   tally.textContent = `${effort.closed}/${effort.total} fechadas`
 }
@@ -709,7 +923,10 @@ function route() {
     })
   }
   const archived = hash.startsWith('archive/')
-  renderEffort(archived ? hash.slice('archive/'.length) : hash, archived)
+  let slug = archived ? hash.slice('archive/'.length) : hash
+  const graph = slug.endsWith('/grafo')
+  if (graph) slug = slug.slice(0, -'/grafo'.length)
+  renderEffort(slug, archived, graph)
 }
 
 async function refresh() {

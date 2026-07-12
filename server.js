@@ -131,6 +131,25 @@ function normalizeStatus(value) {
 
 const isClosed = (status) => CLOSED.includes(status)
 
+/**
+ * `Blocked by:` promete uma lista de números e entrega prosa: `01 (resolvido), 08 — a
+ * revisão achou defeito no decayOffline; a bancada deve testar o binário corrigido`.
+ *
+ * Só o número que **abre** cada fragmento é referência — casar o fragmento inteiro
+ * contra a lista de issues nunca acha ninguém, e o bloqueio some. O resto é a
+ * justificativa, e é o que se lê antes de decidir furar a fila; por isso cada
+ * dependência carrega os dois. Fragmento sem número que o abra (`(nada — pode começar
+ * já)`) não referencia issue nenhuma e não vira dependência.
+ */
+const parseBlockedBy = (value) =>
+  (value ?? '')
+    .split(',')
+    .map((part) => {
+      const m = /^\s*(\d+)\s*(.*)$/.exec(part)
+      return m ? { number: m[1].padStart(2, '0'), note: m[2].trim(), raw: part.trim() } : null
+    })
+    .filter(Boolean)
+
 async function readIssue(effortSlug, dir, file) {
   const path = join(dir, file)
   const { header, title } = parseDoc(await readFile(path, 'utf8'))
@@ -143,13 +162,11 @@ async function readIssue(effortSlug, dir, file) {
     number: /^(\d+)/.exec(file)?.[1] ?? '',
     title: title ?? file.replace(/\.md$/, ''),
     status,
+    closed: isClosed(status),
     column: columnOf(status),
     type: header.type ?? null,
     repo: header.repo ?? null,
-    blockedBy: (header['blocked by'] ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
+    blockedBy: parseBlockedBy(header['blocked by']),
   }
 }
 
@@ -164,11 +181,12 @@ async function readEffort(root, slug) {
 
   const issues = await Promise.all(files.map((f) => readIssue(slug, issuesDir, f)))
 
-  // Um item está bloqueado se qualquer issue que ele lista ainda não fechou.
-  const byNumber = new Map(issues.map((i) => [i.number, i]))
+  // Um item está bloqueado se qualquer issue que ele lista ainda não fechou. Uma
+  // referência a issue que não existe não bloqueia: não há o que esperar.
+  const byNumber = new Map(issues.map((i) => [i.number.padStart(2, '0'), i]))
   for (const issue of issues) {
-    issue.blocked = issue.blockedBy.some((n) => {
-      const dep = byNumber.get(n.padStart(2, '0')) ?? byNumber.get(n)
+    issue.blocked = issue.blockedBy.some((d) => {
+      const dep = byNumber.get(d.number)
       return dep ? !isClosed(dep.status) : false
     })
   }

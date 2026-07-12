@@ -34,6 +34,8 @@ A lista fechada de chaves protege o *parser*, mas atrapalha quem quer **resumir*
 
 `Blocked by:` também não obedece ao formato que promete. Na prática existe `Blocked by: 01 (resolvido), 02 (done), 08 — a revisão achou defeito crítico…, senão o shadow emite lixo`. Só o número que **abre** cada fragmento separado por vírgula é referência; o resto é prosa, e prosa a ser lida — é a justificativa do bloqueio.
 
+Isso vale no servidor e no renderer, e o servidor já errou aqui: ele guardava o fragmento inteiro e o procurava na lista de issues, o que nunca acha ninguém quando há prosa junto do número — a issue ficava silenciosamente **não bloqueada**. `parseBlockedBy()` agora quebra cada fragmento em `{ number, note }`: o número resolve a aresta, a nota é a justificativa que o hover do grafo devolve. Fragmento sem número que o abra (`(nada — pode começar já)`) não referencia issue nenhuma e não vira dependência.
+
 ## Dois vocabulários de caminho
 
 Todo item da API carrega dois nomes para o mesmo arquivo: `path`, o caminho **dentro do container** (`/workspace/.scratch/...`), por onde o board lê; e `ref`, o caminho **como o workspace o vê** (`.scratch/...`), que é o único que faz sentido colar num agente.
@@ -97,6 +99,24 @@ Duas armadilhas do renderer, ambas já pagas:
 - **Especificidade.** As regras do corpo renderizado precisam do id (`#drawer-body.md`), não só da classe: `#drawer-body` vence `.md` e o documento inteiro sai monoespaçado, com os `\n` entre blocos virando linhas em branco.
 
 A gaveta é **redimensionável** pela alça na borda esquerda (duplo clique volta ao padrão). A largura vive em `localStorage` — a única coisa que o board guarda fora dos `.md`, e não fere o princípio: a fonte da verdade é o *conteúdo*, e largura de painel não é conteúdo. Nenhum agente lê, nenhum arquivo depende, e perdê-la não perde nada. Em tela estreita a gaveta ocupa tudo e a alça some — não há o que arrastar.
+
+## O grafo de dependências
+
+A página de um esforço tem duas visões, e a escolhida vive no **hash** (`#/<slug>/grafo`) — não em `localStorage`: é onde já vive o resto da navegação, e assim o grafo de um esforço vira um link colável.
+
+O grafo nasceu de querer as setas de um Gantt sem o Gantt. Um Gantt gasta o eixo X com tempo, e o `.scratch/` não tem data de início nem duração; inventá-las à mão em cada `.md` criaria um estado que ninguém mantém, e **data podre mente com mais confiança que a ausência dela**. Mas as setas não precisam de tempo: elas são as arestas do `Blocked by:`, e essas existem. Trocado o eixo por **profundidade**, a camada 0 passa a ser a frontier — o que dá para atacar agora — e cada coluna à direita é o que aquilo destrava. É a pergunta que o board já responde, agora desenhada.
+
+Como ele se sustenta:
+
+- **A camada é o maior caminho** até uma issue sem dependência, não o menor. Com o menor, um nó apareceria à esquerda de algo que ele espera e a seta andaria para trás.
+- **Ciclo não estoura.** Não deveria existir num `Blocked by:`, mas se existir a aresta que fecha o laço é ignorada. O board mostra o que o arquivo diz, e um arquivo pode estar errado.
+- **Dentro da camada, a ordem é o baricentro** das dependências: o nó fica na altura média de quem o bloqueia. É o que evita cruzamento gratuito de curvas.
+- **A altura do nó é fixa** (`NODE_H`) porque entra no cálculo da posição das curvas. Título que estica desalinha as setas — daí o clamp de duas linhas.
+- **Issue fechada continua no grafo**, esmaecida: é ela que explica o que soltou a frontier. Sem ela, uma issue destravada apareceria solta, sem história. A aresta já cumprida entra tracejada e verde; a que ainda segura alguém, sólida e vermelha.
+- **A prosa do `Blocked by:` é o tooltip da aresta** — a justificativa do bloqueio é o que se lê antes de decidir furar a fila.
+- **Os nós são HTML posicionado; o SVG só desenha as curvas.** Assim o chip de status, o foco por teclado e o clique que abre a gaveta são os mesmos da lista, sem reimplementar texto em SVG. Cuidado ao mexer: `el()` monta HTML, e um `<defs>`/`<marker>` criado por ele não estaria no namespace SVG — o navegador aceita e ignora, e as setas somem sem erro nenhum. Por isso o `svg()`.
+
+O grafo não inventa nada: as referências do `Blocked by:` são locais ao esforço, então ele nunca cruza slugs, e um esforço sem nenhuma aresta vira uma coluna só — com uma nota dizendo isso, em vez de fingir um desenho.
 
 ## Scratchpads de sessão
 
