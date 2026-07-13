@@ -26,8 +26,17 @@ const RETRY_MS = 2000
  * Vigia `root` recursivamente e chama `onChange(paths)` uma vez por rajada.
  *
  * Devolve a função que encerra o watch. `paths` são caminhos absolutos, deduplicados.
+ *
+ * `open` é o `fs.watch` — e é parâmetro por uma razão só: o `error` de um watcher **não
+ * se provoca de fora**. Apagar o root não emite `error` (verificado: o kernel manda
+ * `rename` e cala), então a única forma de exercitar o reopen de verdade, em teste, é
+ * entregar um watcher que erra sob comando. O padrão é o `fs.watch` de sempre.
  */
-export function watchTree(root, onChange, { debounce = DEBOUNCE_MS, retry = RETRY_MS } = {}) {
+export function watchTree(
+  root,
+  onChange,
+  { debounce = DEBOUNCE_MS, retry = RETRY_MS, open = watch } = {},
+) {
   let watcher = null
   let timer = null
   let retryTimer = null
@@ -52,30 +61,32 @@ export function watchTree(root, onChange, { debounce = DEBOUNCE_MS, retry = RETR
     watcher = null
     retryTimer = setTimeout(() => {
       retryTimer = null
-      open()
+      begin()
     }, retry)
     // Não é o watcher que segura o processo de pé — é o servidor HTTP.
     retryTimer.unref?.()
   }
 
-  const open = () => {
+  const begin = () => {
     if (closed) return
     try {
       // Recursivo: um esforço novo é um **diretório** novo, e ele tem que aparecer sem
       // reiniciar nada. Verificado: o inotify atravessa o bind mount `:ro` do container,
       // o recursivo funciona no ext4, e ele pega arquivo criado dentro de diretório que
       // nasceu *depois* do watch começar.
-      watcher = watch(root, { recursive: true }, (_type, name) => {
+      watcher = open(root, { recursive: true }, (_type, name) => {
         if (name) touched.add(join(root, name))
         arm()
       })
       watcher.on('error', reopen)
     } catch {
+      // O root pode nem existir ainda (montagem atrasada, diretório recriado). Isso não
+      // é fatal: tenta de novo daqui a pouco, em vez de deixar o board mudo para sempre.
       reopen()
     }
   }
 
-  open()
+  begin()
 
   return () => {
     closed = true

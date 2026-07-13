@@ -8,7 +8,7 @@
  */
 import { api, esc } from './dom.js'
 import { state } from './state.js'
-import { view } from './shell.js'
+import { view, bindConnection } from './shell.js'
 import { renderOverview } from './overview.js'
 import { renderEffort } from './effort.js'
 import { renderPads } from './pads.js'
@@ -48,9 +48,15 @@ export async function refresh() {
  *
  * O `EventSource` reconecta sozinho, e na reconexão o servidor manda o board inteiro — um
  * restart do container se cura sem F5.
+ *
+ * Mas push que morre, morre **calado**: um servidor no chão e um board parado emitem o
+ * mesmo nada. Por isso o `source` vai para o `shell.js` — é o cabeçalho que conta se a
+ * conexão ainda está de pé, e é ele que oferece o botão de reler quando ela não está.
  */
 export function connect() {
   const source = new EventSource('/api/stream')
+
+  bindConnection(source, refresh)
 
   source.onmessage = (ev) => {
     const { board, changed } = JSON.parse(ev.data)

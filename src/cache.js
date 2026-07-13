@@ -23,7 +23,9 @@ import { buildBoard } from './board.js'
 
 const hashOf = (json) => createHash('sha1').update(json).digest('hex')
 
-let json = null
+// A única memória do módulo: o hash do último board que **saiu daqui**. É contra ele que
+// toda leitura nova se compara — e é a razão de a varredura de segurança (90s) custar
+// quase nada: ela reconstrói, não reconhece nada de novo, e cala a boca.
 let hash = null
 
 /**
@@ -31,18 +33,16 @@ let hash = null
  *
  * `changed` é o único sinal que autoriza um push — e é falso sempre que a leitura nova é
  * byte-a-byte a leitura velha. A primeira leitura sempre muda: não havia board antes.
+ *
+ * Não existe um `current()` que devolva "o que eu acredito": todo caminho até o board
+ * passa por uma leitura de disco. Um board de memória servido sem reler é exatamente o
+ * silêncio mentiroso que o push corre o risco de virar — e o cache que existe aqui é para
+ * **suprimir** o que não mudou, nunca para *responder* no lugar do disco.
  */
 export async function refresh() {
-  const next = JSON.stringify(await buildBoard())
-  const nextHash = hashOf(next)
-  const changed = nextHash !== hash
-  json = next
-  hash = nextHash
+  const json = JSON.stringify(await buildBoard())
+  const next = hashOf(json)
+  const changed = next !== hash
+  hash = next
   return { json, hash, changed }
-}
-
-/** O board como a última leitura o viu — lendo o disco se ninguém leu ainda. */
-export async function current() {
-  if (json === null) return await refresh()
-  return { json, hash, changed: false }
 }

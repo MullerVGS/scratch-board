@@ -16,7 +16,7 @@ import { resolve, extname, sep } from 'node:path'
 
 import { SCRATCH, PADS } from './paths.js'
 import { listPads } from './pads.js'
-import { refresh, current } from './cache.js'
+import { refresh } from './cache.js'
 import { watchTree } from './watch.js'
 
 const PORT = Number(process.env.PORT ?? 7777)
@@ -31,6 +31,24 @@ const TEXT_LIMIT = 512 * 1024
 
 /** Um comentário SSE de tempos em tempos: mantém o socket vivo e denuncia o que morreu. */
 const PING_MS = 30_000
+
+/**
+ * A **varredura de segurança**. Um push que falha, falha em **silêncio** — e silêncio é
+ * byte-a-byte indistinguível de "nada mudou". Se o `fs.watch` morrer (limite de inotify,
+ * root remontado, um evento que o kernel simplesmente não entregou), o board mostraria
+ * dados velhos com cara de vivos, para sempre. Pior que o polling que matamos, porque o
+ * polling era burro demais para conseguir mentir.
+ *
+ * Então, de 90 em 90 segundos, o servidor relê o disco por conta própria. Ela é quase de
+ * graça **por causa da supressão**: `sync()` reconstrói, compara o hash e só emite se
+ * divergir — e ele só diverge se o watcher tiver perdido alguma coisa. No board parado
+ * são ~40 reconstruções por hora (~15ms de CPU cada) e **zero byte no fio, zero
+ * re-render**. Contra as 720 reconstruções *com* 720 re-renders do polling.
+ *
+ * O que ela devolve ao board é a propriedade que o polling tinha de graça: ele não
+ * consegue ficar em silêncio mentiroso por mais de 90 segundos.
+ */
+const SWEEP_MS = 90_000
 
 /** Prende um `path` vindo do cliente aos roots que o board pode ler. */
 function safePath(input) {
@@ -92,9 +110,17 @@ async function handler(req, res) {
         connection: 'keep-alive',
       })
       // O snapshot de conexão. É ele que cura o restart do container sem F5: o
-      // `EventSource` reconecta sozinho e o servidor devolve o board inteiro.
+      // `EventSource` reconecta sozinho e o servidor devolve o board **inteiro**.
+      //
+      // E ele **relê o disco** (`sync()`), em vez de servir o que o cache acredita. A
+      // diferença aparece justamente na hora em que ela importa: se a aba está
+      // reconectando, alguma coisa esteve quebrada — e se o que quebrou foi o watcher, o
+      // cache está velho. Servir o cache aqui seria devolver a mentira que a reconexão
+      // veio consertar. Custa uma reconstrução por conexão aberta, e conexão se abre
+      // pouco. (Como todo `sync()`, se a releitura descobrir novidade, as outras abas
+      // são avisadas — a descoberta não fica presa em quem conectou.)
       res.write(`retry: 2000\n\n`)
-      res.write(frame((await current()).json, []))
+      res.write(frame(await sync(), []))
       clients.add(res)
       const ping = setInterval(() => res.write(': ping\n\n'), PING_MS)
       const drop = () => {
@@ -138,25 +164,40 @@ async function handler(req, res) {
 }
 
 /**
- * Sobe o servidor e liga o watcher nele.
+ * Sobe o servidor, liga o watcher nele e arma a varredura de segurança.
  *
  * Porta `0` pede uma porta efêmera ao sistema — é assim que o teste de integração sobe um
  * board de verdade contra um `.scratch/` temporário sem brigar com o container que já roda
- * na 7777.
+ * na 7777. `sweep` encurta a varredura para o mesmo teste poder assistir a ela agir.
+ *
+ * `stopWatch` mata o watcher **sem** derrubar o servidor. Não é enfeite de teste: é a
+ * falha que a varredura existe para cobrir, e é como ela se torna demonstrável em vez de
+ * prometida — um watcher morto é exatamente isto.
  */
-export function start(port = PORT) {
+export function start(port = PORT, { sweep = SWEEP_MS } = {}) {
   const server = createServer(handler)
   const unwatch = watchTree(SCRATCH, (paths) => {
     sync(paths).catch(() => { /* o disco piscou; a varredura de segurança repesca */ })
   })
+
+  // A varredura empurra com `changed` vazio, e é honesto: se o watcher perdeu o evento,
+  // ninguém aqui sabe *quais* caminhos mexeram. O board vem inteiro e certo; o que a
+  // varredura não pode é inventar uma lista de caminhos que ela não viu.
+  const sweeper = setInterval(() => {
+    sync().catch(() => { /* a próxima volta repesca — a varredura não desiste */ })
+  }, sweep)
+  // Quem segura o processo de pé é o servidor HTTP, não o relógio.
+  sweeper.unref?.()
 
   return new Promise((ok) => {
     server.listen(port, () => {
       ok({
         server,
         port: server.address().port,
+        stopWatch: unwatch,
         close: async () => {
           unwatch()
+          clearInterval(sweeper)
           for (const res of clients) res.end()
           clients.clear()
           await new Promise((done) => server.close(done))

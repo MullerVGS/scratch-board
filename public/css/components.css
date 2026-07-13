@@ -298,3 +298,41 @@ button.act.primary:hover {
   border-color: var(--green);
   color: var(--green);
 }
+
+/* ---------- reler o board ----------
+
+   A válvula de escape humana: para quando você não confia no que está vendo. Ela vale
+   pouco sozinha — o board já chega sozinho — e vale tudo quando o pontinho está âmbar.
+
+   Herda `button.icon` (tamanho, alvo de toque, hover), que hoje ainda mora no
+   `drawer.css` por ter nascido lá. As nove folhas carregam todas, então ele já se
+   aplica aqui; mudá-lo de casa é arrumação do ticket 10, não deste. */
+
+button.refresh {
+  font-size: 14px;
+}
+
+button.refresh:disabled {
+  cursor: progress;
+}
+
+/* O giro é a resposta ao clique: sem ele, um board que não mudou nada devolveria o
+   mesmo pixel e o botão pareceria quebrado. */
+button.refresh.spin {
+  color: var(--accent);
+  animation: refresh-spin 0.7s linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Idem ao pulso do indicador: sob `reduced-motion` o reset zeraria a duração e o giro
+   infinito viraria tremor. Fica a cor de accent, que já diz "estou indo". */
+@media (prefers-reduced-motion: reduce) {
+  button.refresh.spin {
+    animation-name: none;
+  }
+}
