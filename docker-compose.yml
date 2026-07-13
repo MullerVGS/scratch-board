@@ -5,11 +5,6 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:7777:7777"
-    networks:
-      # O newt alcança o board pelo nome do container, não pela porta publicada: o
-      # bind acima é loopback, e o newt chega pelo gateway da bridge (172.17.0.1).
-      - default
-      - admin_network
     volumes:
       # Fonte da verdade. Read-only: o board é uma projeção — quem escreve nos .md
       # são você e as skills. O mount é a garantia, não só a intenção.
@@ -25,7 +20,3 @@ services:
       # o recebe por `/shared/doc.js`.
       - ./shared:/app/shared:ro
       - ./public:/app/public:ro
-
-networks:
-  admin_network:
-    external: true
