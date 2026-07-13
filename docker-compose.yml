@@ -4,7 +4,9 @@ services:
     container_name: scratch-board
     restart: unless-stopped
     ports:
-      - "127.0.0.1:7777:7777"
+      # Não é loopback: o newt roda em container e chega ao host pelo gateway da
+      # bridge (172.17.0.1), onde um bind em 127.0.0.1 não escuta.
+      - "0.0.0.0:7777:7777"
     volumes:
       # Fonte da verdade. Read-only: o board é uma projeção — quem escreve nos .md
       # são você e as skills. O mount é a garantia, não só a intenção.
