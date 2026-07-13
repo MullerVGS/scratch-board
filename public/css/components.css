@@ -1,0 +1,300 @@
+/* components — o que reaparece em mais de uma tela: botão de copiar, prompt de skill,
+   chip de status e a barra de ação do esforço. Aqui é onde um alvo copiável novo herda
+   as regras do `copyBtn()` sem reimplementá-las. */
+
+/* ---------- copiar ----------
+
+   O botão vive no DOM sempre — escondê-lo com `display:none` até o hover o tiraria
+   da ordem de tabulação, e quem navega por teclado nunca o alcançaria. Some pela
+   opacidade, aparece no hover do container ou quando recebe foco. */
+
+.copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  font: 500 11px/1.5 var(--mono);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.copy .ico::before {
+  content: "⧉";
+  font-size: 12px;
+}
+
+/* O ✓ confirma na própria affordance: com vários botões na tela, um toast no rodapé
+   não diz *qual* deles copiou. */
+.copy.done {
+  opacity: 1;
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 40%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+.copy.done .ico::before {
+  content: "✓";
+}
+
+:where(.effort, .card, .file, .pad, .prompt, .drawer-head, .actionbar, nav):hover .copy {
+  opacity: 0.7;
+}
+
+.copy:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+
+.copy:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Com rótulo é ação de primeira classe, não affordance de hover: fica sempre visível. */
+.copy.labelled {
+  opacity: 1;
+  padding: 0 10px;
+  min-height: var(--tap);
+  border-color: var(--line);
+  background: var(--panel-2);
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.copy.labelled > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sem hover não há como revelar o botão: ele fica visível, e cresce até caber o dedo. */
+@media (hover: none) {
+  .copy {
+    opacity: 1;
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+
+  .copy .ico::before {
+    font-size: 14px;
+  }
+}
+
+/* ---------- prompts de skill ----------
+
+   O comando aparece literal e é o próprio alvo da cópia: você cola o que leu.
+
+   O comando manda no layout: ele ocupa a linha inteira e quebra por palavra, em vez de
+   rolar na horizontal dentro de uma faixa estreita. Ler o comando é o ponto — um trecho
+   escondido atrás de scroll lateral é um comando que você cola sem ter lido. */
+
+.prompts {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.prompt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-width: 0;
+  padding: 10px 10px 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.prompt.primary {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.prompt code {
+  flex-basis: 100%;
+  font: 12.5px/1.55 var(--mono);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prompt .hint {
+  flex: 1;
+  min-width: 0;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.prompt .copy {
+  margin-left: auto;
+}
+
+/* Com espaço, o comando volta a dividir a linha com a dica — a leitura fica numa
+   varredura só, e a lista de prompts fica curta. */
+@media (min-width: 900px) {
+  .prompt {
+    flex-wrap: nowrap;
+  }
+
+  .prompt code {
+    flex-basis: auto;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .prompt .hint {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+/* ---------- rótulos de status ---------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 19px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--panel-2);
+  white-space: nowrap;
+}
+
+.chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.chip.plain::before {
+  display: none;
+}
+
+.chip[data-s^="needs"] {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 32%, transparent);
+  background: color-mix(in srgb, var(--amber) 10%, var(--panel-2));
+}
+
+.chip[data-s^="ready"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+}
+
+.chip[data-s="claimed"],
+.chip[data-s="partial"] {
+  color: var(--violet);
+  border-color: color-mix(in srgb, var(--violet) 32%, transparent);
+  background: color-mix(in srgb, var(--violet) 10%, var(--panel-2));
+}
+
+.chip[data-s="resolved"],
+.chip[data-s="done"] {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 32%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, var(--panel-2));
+}
+
+.chip[data-s="wontfix"] {
+  color: var(--faint);
+}
+
+.chip[data-s^="?"] {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 42%, transparent);
+  background: color-mix(in srgb, var(--red) 12%, var(--panel-2));
+}
+/* ---------- barra de ação do esforço ---------- */
+
+.actionbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+
+.actionbar.ready {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
+  background: color-mix(in srgb, var(--green) 7%, var(--panel));
+}
+
+/* A frase toma a linha inteira no estreito; com espaço, ela empurra os botões para a
+   direita. Um `margin-left: auto` no botão faria o mesmo, mas quebraria quando os
+   botões passam de dois. */
+.actionbar p {
+  margin: 0;
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (min-width: 640px) {
+  .actionbar p {
+    flex: 1;
+    flex-basis: auto;
+    margin-right: auto;
+  }
+}
+
+button.act {
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--mono);
+  padding: 0 12px;
+  min-height: var(--tap);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+button.act:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel-2));
+}
+
+button.act.primary {
+  font-family: var(--sans);
+  font-weight: 600;
+  border-color: color-mix(in srgb, var(--green) 45%, transparent);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+button.act.primary:hover {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  border-color: var(--green);
+  color: var(--green);
+}

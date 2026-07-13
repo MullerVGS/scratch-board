@@ -1,0 +1,201 @@
+/* shell — a moldura da página: topo, trilha, área principal, cabeçalho de seção,
+   toast e o estado vazio. Nada aqui sabe o que o board mostra por dentro. */
+
+/* ---------- topo ---------- */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  min-height: 56px;
+  padding: 8px max(var(--gutter), env(safe-area-inset-right)) 8px max(var(--gutter), env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* O contador é a informação mais dispensável do topo: no estreito ele sai antes
+   que o resto comece a se espremer. */
+.tally {
+  display: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 900px) {
+  .tally {
+    display: inline;
+  }
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--faint);
+  font-size: 13px;
+}
+
+/* No estreito a trilha desce para uma linha própria: quatro elementos numa faixa de
+   56px é o que quebra primeiro. */
+nav:not(:empty) {
+  flex-basis: 100%;
+  order: 3;
+}
+
+@media (min-width: 900px) {
+  nav:not(:empty) {
+    flex-basis: auto;
+    order: 0;
+  }
+}
+
+nav span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-family: var(--mono);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+nav button {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  padding: 3px 7px;
+  min-height: var(--tap);
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+nav button:hover {
+  background: var(--panel-2);
+}
+
+main {
+  padding: clamp(18px, 3vw, 28px) max(var(--gutter), env(safe-area-inset-right))
+    calc(48px + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+/* ---------- seções ---------- */
+
+.section {
+  margin-bottom: clamp(26px, 3vw, 36px);
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-bottom: 10px;
+  margin-bottom: var(--gap);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.section-head .n {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 0 7px;
+  line-height: 17px;
+}
+
+/* A glosa da seção não disputa a linha do título no estreito: cai para baixo e
+   alinha à esquerda, como o texto que é. */
+.section-head p {
+  margin: 0;
+  flex-basis: 100%;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+@media (min-width: 900px) {
+  .section-head p {
+    flex-basis: auto;
+    margin-left: auto;
+    text-align: right;
+  }
+}
+/* ---------- toast ---------- */
+
+#toast {
+  position: fixed;
+  bottom: calc(26px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  z-index: 20;
+  box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.55);
+  animation: slide-up 0.16s ease;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translate(-50%, 8px);
+    opacity: 0;
+  }
+}
+
+.empty {
+  color: var(--faint);
+  font-size: 12px;
+  padding: 10px 4px;
+  text-align: center;
+}

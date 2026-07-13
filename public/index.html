@@ -8,7 +8,24 @@
     <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)" />
     <title>scratch board</title>
-    <link rel="stylesheet" href="/style.css" />
+    <!-- Uma folha por assunto, em vários `<link>` — o navegador as busca em paralelo.
+         `@import` dentro de um CSS seria serial (cada folha só é descoberta depois que a
+         anterior chega), e sem bundler não há quem as junte.
+
+         A ordem abaixo **é** a cascata, e reproduz a do antigo `style.css`: `base`
+         primeiro, porque é dele que todas as outras leem os tokens; o resto na ordem em
+         que as telas se sobrepõem. Mexer na ordem é mexer no desempate entre regras de
+         mesma especificidade — não é decoração. -->
+
+    <link rel="stylesheet" href="/css/base.css" />
+    <link rel="stylesheet" href="/css/shell.css" />
+    <link rel="stylesheet" href="/css/efforts.css" />
+    <link rel="stylesheet" href="/css/pads.css" />
+    <link rel="stylesheet" href="/css/components.css" />
+    <link rel="stylesheet" href="/css/kanban.css" />
+    <link rel="stylesheet" href="/css/drawer.css" />
+    <link rel="stylesheet" href="/css/markdown.css" />
+    <link rel="stylesheet" href="/css/graph.css" />
     <link
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>"

@@ -1,0 +1,160 @@
+/* kanban — a segunda visão do esforço: as colunas de estágio e o card de issue. */
+
+/* ---------- kanban ---------- */
+
+/* Flex, e não grid, porque a coluna vazia precisa **devolver a largura**.
+
+   Num grid, todo track recebe seu `1fr` mesmo que o conteúdo seja uma linha de rótulo:
+   um estágio zerado reservava um quarto da tela para não mostrar nada. No flex, a coluna
+   com issues cresce (`flex: 1`) e a vazia fica do tamanho do próprio rótulo.
+
+   Quantas colunas cabem lado a lado é a largura que decide — o `flex-basis` é o piso, o
+   `wrap` faz o resto, e a passagem de quatro para uma não tem degrau nem breakpoint. */
+.board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: start;
+}
+
+/* Por dentro, a coluna é uma grade fluida — não um fio único de cards.
+
+   As duas coisas são a mesma quando a coluna é estreita: cabe um card por linha, e o
+   empilhamento é o de sempre. A diferença aparece quando a coluna herda a largura que as
+   vazias devolveram — um esforço arquivado, onde só FECHADO tem issues, esticava cada
+   card para a largura da tela para escrever um título de seis palavras. Agora eles se
+   espalham, e a densidade acompanha o espaço em vez de brigar com ele. */
+.col {
+  flex: 1 1 var(--kcol-min);
+  min-width: min(var(--kcol-min), 100%);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr));
+  align-content: start;
+  gap: 8px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+
+/* Coluna vazia não merece uma caixa nem uma coluna: encolhe até o rótulo. Some o
+   travessão e some a altura — num esforço arquivado, três estágios zerados ocupavam uma
+   tela inteira antes de a primeira issue fechada aparecer. Fica visível porque saber que
+   o estágio existe e está vazio é informação; deixa de custar espaço porque não é
+   informação que valha um quarto da tela. */
+.col.is-empty {
+  flex: 0 1 auto;
+  min-width: 0;
+  background: none;
+  border-style: dashed;
+  padding: 8px 12px;
+  opacity: 0.65;
+}
+
+.col.is-empty > header {
+  gap: 10px;
+  padding-bottom: 0;
+}
+
+.col.is-empty .empty {
+  display: none;
+}
+
+/* O `grid-column` vem depois do `all: unset` de propósito: o reset apaga tudo o que foi
+   declarado antes dele, e o cabeçalho precisa atravessar a grade de cards da coluna. */
+.col > header {
+  all: unset;
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 12px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.col > header span:last-child {
+  font-family: var(--mono);
+  color: var(--faint);
+  background: var(--panel-2);
+  border-radius: 99px;
+  padding: 0 6px;
+  line-height: 17px;
+  letter-spacing: 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 9px;
+  box-shadow: var(--shadow);
+  transition: border-color 0.12s, transform 0.12s;
+}
+
+.card:hover,
+.card:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.card:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.card:active {
+  transform: translateY(0);
+}
+
+.card.is-blocked {
+  border-left: 2px solid var(--red);
+}
+
+.card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.card-title > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.card-title b {
+  font-family: var(--mono);
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 500;
+  margin-right: 6px;
+}
+
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.card-meta .copy {
+  margin-left: auto;
+}
+
+.blocked-tag {
+  font-size: 11px;
+  color: var(--red);
+}

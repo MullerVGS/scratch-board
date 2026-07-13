@@ -1,0 +1,152 @@
+/* ============================================================================
+   base — tokens, breakpoints e reset. Sem build step.
+
+   Este é o **único** arquivo que declara token e o **único** que abre um
+   breakpoint de escala. As folhas de assunto (shell, efforts, pads, components,
+   kanban, drawer, markdown, graph) consomem os tokens e só abrem media query
+   quando o que muda é a *forma* — nunca o tamanho. Não há `@import`: o
+   `index.html` traz as folhas em vários `<link>`, que o navegador busca em
+   paralelo, e a ordem dos `<link>` é a cascata.
+
+   A lógica é **mobile-first e por token**, não desktop-first por exceção.
+
+   O layout nunca pergunta o tamanho da tela: ele lê `--gutter`, `--gap`,
+   `--fs-doc` e `--tap` do `:root`. Os breakpoints reajustam esses tokens, e só
+   tocam em regra de layout quando o que muda é a *forma* (a gaveta que vira
+   tela cheia, o kanban que empilha) — nunca quando é só *tamanho*.
+
+   O valor base é o do celular; `min-width` sobe dali. Isso importa para a
+   tipografia: o texto de leitura quer ~15,5px no celular e ~13,5px no desktop,
+   e essa relação é inversa à largura da tela — um `clamp()` em `vw` a inverteria.
+   ========================================================================= */
+
+:root {
+  --bg: #0b0e14;
+  --bg-soft: #0f131b;
+  --panel: #141922;
+  --panel-2: #1a2029;
+  --panel-3: #212936;
+  --line: #262d3a;
+  --line-soft: #1d232e;
+  --text: #e8edf4;
+  --muted: #97a2b3;
+  --faint: #6b7688;
+  --accent: #5aa9ff;
+  --green: #4bc26a;
+  --amber: #e0a231;
+  --violet: #b98cff;
+  --red: #ff6b60;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.3), 0 14px 30px -16px rgba(0, 0, 0, 0.7);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  /* --- escala (valores do celular; os breakpoints sobem daqui) --- */
+
+  /* Respiro lateral da página. Entra somado ao safe-area para não cair sob o notch. */
+  --gutter: 14px;
+  /* Entre cards da grade e entre colunas do kanban. */
+  --gap: 10px;
+  /* Corpo do markdown na gaveta — o texto que existe para ser lido. */
+  --fs-doc: 15.5px;
+  /* Largura mínima de um card antes de a grade quebrar a coluna. */
+  --card-min: 260px;
+  /* Idem para a coluna do kanban. */
+  --kcol-min: 250px;
+  /* Altura mínima de um alvo tocável. No mouse não precisa; no dedo, precisa. */
+  --tap: 30px;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --gutter: 20px;
+    --gap: 12px;
+    --card-min: 300px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --gutter: 24px;
+    --gap: 14px;
+    --fs-doc: 13.5px;
+    --card-min: 320px;
+    --kcol-min: 260px;
+  }
+}
+
+/* O dedo não tem hover e não tem precisão: os alvos crescem, e o que só aparecia
+   no hover passa a estar sempre visível. É a única consulta que pergunta pelo
+   *dispositivo* em vez da largura — e é a pergunta certa para isto. */
+@media (hover: none) {
+  :root {
+    --tap: 40px;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f6f9;
+    --bg-soft: #eef1f5;
+    --panel: #ffffff;
+    --panel-2: #f3f5f8;
+    --panel-3: #e8ecf1;
+    --line: #dde2e9;
+    --line-soft: #e8ecf1;
+    --text: #161c24;
+    --muted: #5b6675;
+    --faint: #8b95a3;
+    --accent: #0f6fe0;
+    --green: #1a8c40;
+    --amber: #96660a;
+    --violet: #7546d6;
+    --red: #d02b1f;
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px -14px rgba(16, 24, 40, 0.24);
+    --shadow-lift: 0 2px 6px rgba(16, 24, 40, 0.08), 0 16px 32px -18px rgba(16, 24, 40, 0.3);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* O `display` do UA para [hidden] perde de qualquer regra de autor com display
+   próprio (#drawer é flex). Sem isto, esconder pelo atributo não surte efeito. */
+[hidden] {
+  display: none !important;
+}
+
+html {
+  /* Safari infla o texto no giro para paisagem se não o proibirmos. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  /* O flash cinza do toque em cada card não comunica nada; o :active comunica. */
+  -webkit-tap-highlight-color: transparent;
+  /* Nada nesta página é largo o bastante para justificar rolagem horizontal: o que
+     é largo (grafo, tabela, bloco de código) rola dentro do próprio contêiner. */
+  overflow-x: hidden;
+}
+
+/* Com a gaveta em tela cheia, rolar o fundo por trás dela é rolar o que não se vê.
+   No desktop a gaveta é um painel lateral e o board continua atrás — lá, não. */
+@media (max-width: 899px) {
+  body.locked {
+    overflow: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

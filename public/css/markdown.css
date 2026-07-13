@@ -1,0 +1,328 @@
+/* markdown — o documento renderizado pelo `md.js`: tipografia do corpo, bloco de
+   metadados do cabeçalho e os alvos que o renderer cria (doclink, ref, issueref).
+
+   A regra que liga o documento é `#drawer-body.md` — com o id, não só a classe. É o
+   `drawer.css` que deixa `#drawer-body` (0-1-0-0) monoespaçado, e `.md` sozinho
+   (0-0-1-0) perderia dele **em qualquer ordem de arquivo**. O id é o que ganha. */
+
+/* ---------- markdown renderizado ---------- */
+
+/* Precisa do id: `#drawer-body` (0-1-0-0) venceria `.md` (0-0-1-0) e o documento
+   inteiro sairia monoespaçado, com os `\n` entre blocos virando linhas em branco.
+
+   `--fs-doc` é maior no celular que no desktop — é o único texto da página cujo trabalho
+   é ser lido de ponta a ponta, e no telefone isso se faz a um palmo do olho. */
+#drawer-body.md {
+  white-space: normal;
+  font-family: var(--sans);
+  font-size: var(--fs-doc);
+  line-height: 1.68;
+  color: var(--text);
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 26px 0 10px;
+  line-height: 1.35;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.md h1 {
+  font-size: calc(var(--fs-doc) + 5.5px);
+}
+
+.md h2 {
+  font-size: calc(var(--fs-doc) + 2px);
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+}
+
+.md h3 {
+  font-size: calc(var(--fs-doc) + 0.5px);
+  color: var(--muted);
+}
+
+.md h4,
+.md h5,
+.md h6 {
+  font-size: var(--fs-doc);
+  color: var(--muted);
+}
+
+.md p {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.md strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
+.md li {
+  margin-bottom: 5px;
+}
+
+.md li.nested {
+  margin-left: 16px;
+  list-style-type: circle;
+}
+
+/* Checkbox de acceptance criteria: o marcador diz o estado, sem depender do texto. */
+.md li[data-task] {
+  list-style: none;
+  position: relative;
+}
+
+.md li[data-task]::before {
+  position: absolute;
+  left: -20px;
+  font-family: var(--mono);
+}
+
+.md li[data-task="open"]::before {
+  content: "☐";
+  color: var(--faint);
+}
+
+.md li[data-task="done"]::before {
+  content: "☑";
+  color: var(--green);
+}
+
+.md li[data-task="done"] {
+  color: var(--faint);
+}
+
+.md blockquote {
+  margin: 0 0 12px;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--line);
+  color: var(--faint);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 22px 0;
+}
+
+.md a {
+  color: var(--accent);
+}
+
+.md code {
+  font-family: var(--mono);
+  font-size: 0.87em;
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* O bloco de código rola dentro de si — a gaveta nunca rola na horizontal. */
+.md pre {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.md pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  word-break: normal;
+}
+
+/* Idem para a tabela. */
+.md .tablewrap {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  margin: 0 0 14px;
+}
+
+.md table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12.5px;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+  color: var(--muted);
+}
+
+.md th {
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- cabeçalho do documento ---------- */
+
+/* Chave e valor lado a lado exigem largura: no celular a chave vira rótulo em cima do
+   valor, em vez de espremer o `Blocked by:` numa coluna de dois dedos. */
+.md .meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px 14px;
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+@media (min-width: 640px) {
+  .md .meta {
+    grid-template-columns: auto 1fr;
+    gap: 4px 14px;
+  }
+}
+
+.md .meta-row {
+  display: contents;
+}
+
+.md .meta-k {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 22px;
+}
+
+/* Fluxo normal, não flex: o `Blocked by:` é uma frase com chips dentro, e num flex
+   cada pedaço vira um item solto — a vírgula órfã numa linha, a justificativa noutra. */
+.md .meta-v {
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: var(--muted);
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  .md .meta-v:not(:last-child) {
+    margin-bottom: 8px;
+  }
+}
+
+/* ---------- alvos do documento ---------- */
+
+/* Link entre documentos do esforço: sublinhado, porque é navegação e não cópia. */
+.doclink {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.doclink:hover,
+.doclink:focus-visible {
+  text-decoration-color: var(--accent);
+  outline: none;
+}
+
+/* Caminho de arquivo: clicar copia. Parece código porque é código — mas responde. */
+.ref {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--text);
+  cursor: copy;
+  transition: border-color 0.12s, color 0.12s;
+  word-break: break-all;
+}
+
+.ref:hover,
+.ref:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+}
+
+.ref.done {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.ref.done::after {
+  content: " ✓";
+}
+
+/* Referência de issue (`Blocked by:`): clicar abre a issue na própria gaveta. */
+.issueref {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--red) 12%, var(--panel-2));
+  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line));
+  border-radius: 5px;
+  padding: 1px 7px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.issueref:hover,
+.issueref:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-2));
+  outline: none;
+}
+
+/* A justificativa que acompanha o `Blocked by:` — prosa, e é para ser lida. */
+.meta-note {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* Bloqueio já resolvido não é bloqueio: some o vermelho. */
+.issueref[data-s="resolved"],
+.issueref[data-s="done"],
+.issueref[data-s="wontfix"] {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--faint);
+}
