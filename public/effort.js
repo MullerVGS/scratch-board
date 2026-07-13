@@ -44,14 +44,16 @@ export function renderEffort(slug, archived, graph = false) {
   const effort = pool.find((e) => e.slug === slug)
   if (!effort) return (location.hash = '')
 
-  crumbs.innerHTML = ''
   const back = el('<button>← esforços</button>')
   back.onclick = () => (location.hash = '')
   const here = el(`<span>/ ${esc(slug)}</span>`)
   here.append(copyBtn(slug, 'slug'))
-  crumbs.append(back, here)
+  crumbs.replaceChildren(back, here)
 
-  view.innerHTML = ''
+  // A tela é montada de lado e trocada de uma vez, no fim. Esvaziar a `view` aqui e ir
+  // preenchendo daria ao navegador uma página em branco para pintar no meio do caminho —
+  // a piscada. Uma troca, uma pintura.
+  const parts = []
 
   const bar = el(`
     <div class="actionbar ${effort.archivable ? 'ready' : ''}">
@@ -78,10 +80,10 @@ export function renderEffort(slug, archived, graph = false) {
     bar.append(b)
   }
   bar.append(copyBtn(effort.ref, 'caminho do esforço', effort.ref))
-  view.append(bar)
+  parts.push(bar)
 
   const strip = promptStrip(effortPrompts(effort, archived))
-  if (strip) view.append(strip)
+  if (strip) parts.push(strip)
 
   // A visão escolhida vive no hash, não em `localStorage`: é onde já vive o resto da
   // navegação, e um link para o grafo de um esforço passa a ser colável.
@@ -95,10 +97,10 @@ export function renderEffort(slug, archived, graph = false) {
   const [listBtn, graphBtn] = swap.querySelectorAll('button')
   listBtn.onclick = () => (location.hash = base)
   graphBtn.onclick = () => (location.hash = `${base}/grafo`)
-  view.append(swap)
+  parts.push(swap)
 
   if (graph) {
-    view.append(renderGraph(effort, archived))
+    parts.push(renderGraph(effort, archived))
   } else {
     const boardEl = el('<div class="board"></div>')
     for (const col of board.columns) {
@@ -115,8 +117,9 @@ export function renderEffort(slug, archived, graph = false) {
       for (const issue of issues) node.append(issueCard(issue, effort, archived))
       boardEl.append(node)
     }
-    view.append(boardEl)
+    parts.push(boardEl)
   }
 
+  view.replaceChildren(...parts)
   tally.textContent = `${effort.closed}/${effort.total} fechadas`
 }

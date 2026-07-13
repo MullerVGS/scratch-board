@@ -49,12 +49,12 @@ function padCard(pad) {
 }
 
 export async function renderPads() {
-  crumbs.innerHTML = ''
   const back = el('<button>← esforços</button>')
   back.onclick = () => (location.hash = '')
-  crumbs.append(back, el('<span>/ scratchpads</span>'))
+  crumbs.replaceChildren(back, el('<span>/ scratchpads</span>'))
 
-  view.innerHTML = ''
+  // O fetch vem **antes** de tocar na tela. A ordem antiga esvaziava a `view` e só então
+  // ia buscar os pads: a página ficava em branco durante a viagem inteira até o servidor.
   const { pads } = await api('/api/pads')
 
   const node = el(`
@@ -69,10 +69,10 @@ export async function renderPads() {
   `)
   const grid = node.querySelector('.grid')
   for (const p of pads) grid.append(padCard(p))
-  view.append(node)
-
   if (!pads.length) {
     grid.append(el('<p class="empty">Nenhuma sessão deixou arquivo.</p>'))
   }
+
+  view.replaceChildren(node)
   tally.textContent = `${pads.length} sessões com rascunho`
 }

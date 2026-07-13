@@ -95,8 +95,7 @@ function section(title, blurb, efforts, archived = false) {
 
 export function renderOverview() {
   const board = state.board
-  crumbs.innerHTML = ''
-  view.innerHTML = ''
+  crumbs.replaceChildren()
 
   const archivable = board.efforts.filter((e) => e.archivable)
   const stalled = board.efforts.filter((e) => !e.archivable && e.stalled)
@@ -117,11 +116,14 @@ export function renderOverview() {
     section('Arquivados', 'Encerrados. A trilha de raciocínio continua consultável.', board.archived, true),
   ].filter(Boolean)
 
+  // Atômico. Esvaziar e *depois* preencher garante um frame em branco — o navegador pinta
+  // a página vazia antes de pintar a página nova, e é isso que se vê como piscada. A
+  // árvore nova é montada de lado e trocada de uma vez: uma pintura só.
   if (!sections.length) {
-    view.append(el('<p class="empty">Nenhum esforço em .scratch/</p>'))
+    view.replaceChildren(el('<p class="empty">Nenhum esforço em .scratch/</p>'))
     return
   }
-  view.append(...sections)
+  view.replaceChildren(...sections)
 
   const openIssues = board.efforts.reduce((n, e) => n + (e.total - e.closed), 0)
   tally.textContent = `${board.efforts.length} esforços · ${openIssues} issues abertas · ${board.archived.length} arquivados`

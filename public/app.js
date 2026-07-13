@@ -11,15 +11,17 @@
 import { esc } from './dom.js'
 import { view } from './shell.js'
 import { initDrawer } from './drawer.js'
-import { route, refresh } from './router.js'
+import { route, refresh, connect } from './router.js'
 
 initDrawer()
 
 addEventListener('hashchange', route)
 
+// O primeiro board vem por HTTP; daí em diante ele **chega sozinho**. O `/api/stream`
+// também manda um snapshot ao conectar, mas o `refresh()` não é redundante: ele é a
+// primeira pintura, e não depende de o stream ter subido.
 refresh().catch((err) => {
   view.innerHTML = `<p class="empty">Falha ao ler o board: ${esc(err.message)}</p>`
 })
 
-// O board pergunta ao disco a cada 5s porque ninguém o avisa. É o que o push vem matar.
-setInterval(() => refresh().catch(() => {}), 5000)
+connect()

@@ -3,8 +3,18 @@
 // Esforços, issues e as arestas de bloqueio entre elas. Nada de parsing aqui — o dialeto
 // dos `.md` mora em `shared/doc.js`, que o browser também importa. Nada de HTTP: este
 // módulo não sabe que existe um servidor.
+//
+// E **nada de cache**: `buildBoard()` é, por contrato, "leia o disco agora". Quem guarda o
+// resultado e decide se ele mudou é o `cache.js`; separar as duas coisas é o que faz a
+// supressão do push ser demonstrável em vez de prometida.
+//
+// Nenhum carimbo do filesystem entra no que sai daqui. O esforço já publicou um `mtime` —
+// o do *diretório* —, e ele saiu: aquele número pula quando qualquer entrada nasce, morre
+// ou é renomeada lá dentro, inclusive um `.swp` que o board nem projeta. Ninguém o lia, e
+// dentro do hash ele moveria o hash sem o board mudar, matando a supressão. Carimbo de
+// filesystem não descreve este domínio (ver "Out of Scope" no PRD do push).
 
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { join, extname } from 'node:path'
 
 import {
@@ -79,8 +89,6 @@ export async function readEffort(root, slug) {
 
   const closed = issues.filter((i) => isClosed(i.status)).length
   const moving = issues.some((i) => !['needs-triage', 'needs-info'].includes(i.status))
-  let mtime = 0
-  try { mtime = (await stat(dir)).mtimeMs } catch { /* ignora */ }
 
   return {
     slug,
@@ -98,7 +106,6 @@ export async function readEffort(root, slug) {
     // issues, ou tudo que existe está preso em triagem. Um esforço com issue
     // `ready-for-agent` está enfileirado, não parado — mesmo com zero fechadas.
     stalled: issues.length === 0 || !moving,
-    mtime,
   }
 }
 

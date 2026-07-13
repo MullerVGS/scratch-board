@@ -33,3 +33,33 @@ export async function refresh() {
   state.board = await api('/api/board')
   route()
 }
+
+/**
+ * O push: o board deixa de perguntar e passa a ser avisado.
+ *
+ * Antes, um `setInterval` de 5 segundos perguntava ao disco se algo tinha mudado — 720
+ * vezes por hora, 63 mil leituras de `.md`, e um re-render total a cada volta, com ou sem
+ * novidade. Agora quem fala é o servidor, e ele só fala quando o board **mudou de fato**
+ * (ele compara o hash do payload antes de emitir). A tela só se redesenha por um motivo
+ * verdadeiro.
+ *
+ * O evento carrega o board **inteiro**, não um tick nem um diff: o estado é calculado num
+ * lugar só, e assim o cliente não consegue derivar para um estado que o disco não tem.
+ *
+ * O `EventSource` reconecta sozinho, e na reconexão o servidor manda o board inteiro — um
+ * restart do container se cura sem F5.
+ */
+export function connect() {
+  const source = new EventSource('/api/stream')
+
+  source.onmessage = (ev) => {
+    const { board, changed } = JSON.parse(ev.data)
+    state.board = board
+    route()
+    // Quem mexeu no disco. O board não precisa (ele vem inteiro), mas a gaveta precisa
+    // saber se o documento que está aberto é justamente o que o agente acabou de escrever.
+    dispatchEvent(new CustomEvent('board:push', { detail: { changed } }))
+  }
+
+  return source
+}
