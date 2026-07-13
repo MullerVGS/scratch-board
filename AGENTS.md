@@ -48,7 +48,9 @@ A regra prática: **o board lê por `path`; o humano copia `ref`.** Um comando c
 
 `pos-2101-flapping-guard` não conta história nenhuma, e abrir o PRD para lembrar custa uma navegação. Cada esforço carrega, direto do `/api/board`, o **título** e o **primeiro parágrafo** (`summarize()`) do `map.md` — ou do `PRD.md`, quando não há mapa; o mapa manda porque é o documento que o wayfinder mantém vivo, enquanto o PRD congela na intenção original.
 
-O card mostra o título abaixo do slug; o hover (ou o foco pelo teclado) abre o popup com o parágrafo. Esforço sem documento nenhum não tem resumo a dar — o popup lista os títulos das issues, que é o que existe. Em touch não há popup: sem hover, não há como mostrá-lo antes do toque, e o toque já entra no esforço.
+Os dois vivem **no card**: o título abaixo do slug, o parágrafo em três linhas clampadas abaixo dele.
+
+Já moraram num popup de hover, e o hover era a parte errada da frase. No celular ele não existe — o board simplesmente não tinha resumo lá —, e no desktop custava posicionar um flutuante contra a viewport na mão, a cada card. Pior: com o resumo no card, o popup passou a mostrar exatamente o mesmo texto por cima dele. Três linhas dizem o mesmo em qualquer dispositivo, e quem quiser o resto abre o documento — que é para onde o card leva de qualquer jeito.
 
 ## Copiar
 
@@ -99,6 +101,19 @@ Duas armadilhas do renderer, ambas já pagas:
 - **Especificidade.** As regras do corpo renderizado precisam do id (`#drawer-body.md`), não só da classe: `#drawer-body` vence `.md` e o documento inteiro sai monoespaçado, com os `\n` entre blocos virando linhas em branco.
 
 A gaveta é **redimensionável** pela alça na borda esquerda (duplo clique volta ao padrão). A largura vive em `localStorage` — a única coisa que o board guarda fora dos `.md`, e não fere o princípio: a fonte da verdade é o *conteúdo*, e largura de painel não é conteúdo. Nenhum agente lê, nenhum arquivo depende, e perdê-la não perde nada. Em tela estreita a gaveta ocupa tudo e a alça some — não há o que arrastar.
+
+## A folha de estilo
+
+`style.css` é **mobile-first e por token**, não desktop-first por exceção. O layout nunca pergunta o tamanho da tela: ele lê `--gutter`, `--gap`, `--fs-doc`, `--card-min`, `--kcol-min` e `--tap` do `:root`. Os breakpoints (640px, 1024px, mais um corte em 900px onde a gaveta muda de forma) reajustam esses tokens; regra de layout só entra num breakpoint quando o que muda é a **forma**, nunca o tamanho.
+
+Duas consequências que não são óbvias:
+
+- **A tipografia de leitura é maior no celular que no desktop.** `--fs-doc` vai de 15,5px para 13,5px conforme a tela cresce — o corpo do `.md` é o único texto da página cujo trabalho é ser lido de ponta a ponta, e no telefone isso se faz a um palmo do olho. A relação é *inversa* à largura, então um `clamp()` em `vw` a inverteria. Daí mobile-first: o valor base é o do celular, e o `min-width` desce dele.
+- **`--tap` responde ao dispositivo, não à largura** (`@media (hover: none)`), que é a pergunta certa: quem não tem hover não tem precisão, e é aí que os alvos crescem para 40px e o botão de copiar deixa de depender de um hover que não vai acontecer.
+
+O kanban é **flex, não grid**. Num grid toda coluna leva seu `1fr` mesmo vazia, e um estágio zerado reservava um quarto da tela para não mostrar nada. No flex, a coluna com issues cresce e a vazia encolhe até o rótulo (`.col.is-empty`) — ela continua visível, porque saber que o estágio existe e está zerado é informação, mas deixa de custar espaço. Por dentro, a coluna é uma grade fluida de cards: quando ela herda a largura que as vazias devolveram, os cards se espalham em vez de esticar um título de seis palavras pela tela inteira.
+
+O grafo é a exceção assumida: os nós têm pixel fixo porque a posição das curvas é calculada em cima dele. No celular ele não vira coluna — continua o mesmo desenho, e se lê arrastando **dentro** do contêiner. O que a folha garante é que a *página* nunca role para o lado; o que é largo (grafo, tabela, bloco de código) rola dentro de si.
 
 ## O grafo de dependências
 

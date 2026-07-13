@@ -1,3 +1,18 @@
+/* ============================================================================
+   scratch-board — folha única, sem build step.
+
+   A lógica é **mobile-first e por token**, não desktop-first por exceção.
+
+   O layout nunca pergunta o tamanho da tela: ele lê `--gutter`, `--gap`,
+   `--fs-doc` e `--tap` do `:root`. Os breakpoints reajustam esses tokens, e só
+   tocam em regra de layout quando o que muda é a *forma* (a gaveta que vira
+   tela cheia, o kanban que empilha) — nunca quando é só *tamanho*.
+
+   O valor base é o do celular; `min-width` sobe dali. Isso importa para a
+   tipografia: o texto de leitura quer ~15,5px no celular e ~13,5px no desktop,
+   e essa relação é inversa à largura da tela — um `clamp()` em `vw` a inverteria.
+   ========================================================================= */
+
 :root {
   --bg: #0b0e14;
   --bg-soft: #0f131b;
@@ -15,10 +30,53 @@
   --violet: #b98cff;
   --red: #ff6b60;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.3), 0 14px 30px -16px rgba(0, 0, 0, 0.7);
   --radius: 12px;
   --radius-sm: 8px;
   --sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, Roboto, "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  /* --- escala (valores do celular; os breakpoints sobem daqui) --- */
+
+  /* Respiro lateral da página. Entra somado ao safe-area para não cair sob o notch. */
+  --gutter: 14px;
+  /* Entre cards da grade e entre colunas do kanban. */
+  --gap: 10px;
+  /* Corpo do markdown na gaveta — o texto que existe para ser lido. */
+  --fs-doc: 15.5px;
+  /* Largura mínima de um card antes de a grade quebrar a coluna. */
+  --card-min: 260px;
+  /* Idem para a coluna do kanban. */
+  --kcol-min: 250px;
+  /* Altura mínima de um alvo tocável. No mouse não precisa; no dedo, precisa. */
+  --tap: 30px;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --gutter: 20px;
+    --gap: 12px;
+    --card-min: 300px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --gutter: 24px;
+    --gap: 14px;
+    --fs-doc: 13.5px;
+    --card-min: 320px;
+    --kcol-min: 260px;
+  }
+}
+
+/* O dedo não tem hover e não tem precisão: os alvos crescem, e o que só aparecia
+   no hover passa a estar sempre visível. É a única consulta que pergunta pelo
+   *dispositivo* em vez da largura — e é a pergunta certa para isto. */
+@media (hover: none) {
+  :root {
+    --tap: 40px;
+  }
 }
 
 @media (prefers-color-scheme: light) {
@@ -39,6 +97,7 @@
     --violet: #7546d6;
     --red: #d02b1f;
     --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px -14px rgba(16, 24, 40, 0.24);
+    --shadow-lift: 0 2px 6px rgba(16, 24, 40, 0.08), 0 16px 32px -18px rgba(16, 24, 40, 0.3);
   }
 }
 
@@ -52,12 +111,37 @@
   display: none !important;
 }
 
+html {
+  /* Safari infla o texto no giro para paisagem se não o proibirmos. */
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font: 14px/1.55 var(--sans);
   -webkit-font-smoothing: antialiased;
+  /* O flash cinza do toque em cada card não comunica nada; o :active comunica. */
+  -webkit-tap-highlight-color: transparent;
+  /* Nada nesta página é largo o bastante para justificar rolagem horizontal: o que
+     é largo (grafo, tabela, bloco de código) rola dentro do próprio contêiner. */
+  overflow-x: hidden;
+}
+
+/* Com a gaveta em tela cheia, rolar o fundo por trás dela é rolar o que não se vê.
+   No desktop a gaveta é um painel lateral e o board continua atrás — lá, não. */
+@media (max-width: 899px) {
+  body.locked {
+    overflow: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ---------- topo ---------- */
@@ -65,9 +149,10 @@ body {
 header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 24px;
-  height: 56px;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  min-height: 56px;
+  padding: 8px max(var(--gutter), env(safe-area-inset-right)) 8px max(var(--gutter), env(safe-area-inset-left));
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(10px);
@@ -98,26 +183,54 @@ h1 {
   flex: 1;
 }
 
+/* O contador é a informação mais dispensável do topo: no estreito ele sai antes
+   que o resto comece a se espremer. */
 .tally {
+  display: none;
   color: var(--muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 900px) {
+  .tally {
+    display: inline;
+  }
 }
 
 nav {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   color: var(--faint);
   font-size: 13px;
+}
+
+/* No estreito a trilha desce para uma linha própria: quatro elementos numa faixa de
+   56px é o que quebra primeiro. */
+nav:not(:empty) {
+  flex-basis: 100%;
+  order: 3;
+}
+
+@media (min-width: 900px) {
+  nav:not(:empty) {
+    flex-basis: auto;
+    order: 0;
+  }
 }
 
 nav span {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   font-family: var(--mono);
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 nav button {
@@ -127,7 +240,9 @@ nav button {
   font: inherit;
   cursor: pointer;
   padding: 3px 7px;
+  min-height: var(--tap);
   border-radius: 6px;
+  white-space: nowrap;
   transition: background 0.12s;
 }
 
@@ -136,23 +251,25 @@ nav button:hover {
 }
 
 main {
-  padding: 28px 24px 60px;
+  padding: clamp(18px, 3vw, 28px) max(var(--gutter), env(safe-area-inset-right))
+    calc(48px + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
   max-width: 1440px;
   margin: 0 auto;
 }
 
-/* ---------- visão geral ---------- */
+/* ---------- seções ---------- */
 
 .section {
-  margin-bottom: 36px;
+  margin-bottom: clamp(26px, 3vw, 36px);
 }
 
 .section-head {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   padding-bottom: 10px;
-  margin-bottom: 16px;
+  margin-bottom: var(--gap);
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -176,19 +293,36 @@ main {
   line-height: 17px;
 }
 
+/* A glosa da seção não disputa a linha do título no estreito: cai para baixo e
+   alinha à esquerda, como o texto que é. */
 .section-head p {
-  margin: 0 0 0 auto;
+  margin: 0;
+  flex-basis: 100%;
   color: var(--faint);
   font-size: 12.5px;
-  text-align: right;
 }
 
-/* O `min(320px, 100%)` é o que impede o transbordo: numa tela de 360px o card pediria
-   320px + padding e empurraria a página para o lado. Com ele, o card cede primeiro. */
+@media (min-width: 900px) {
+  .section-head p {
+    flex-basis: auto;
+    margin-left: auto;
+    text-align: right;
+  }
+}
+
+/* ---------- grade de esforços ---------- */
+
+/* `min(var(--card-min), 100%)` é o que impede o transbordo: numa tela de 320px o card
+   pediria 260px + padding e empurraria a página para o lado. Com ele, o card cede.
+
+   `align-items: start` é o que dá altura própria a cada card. Sem isso o grid estica
+   todas as células da linha até a maior, e um esforço de uma issue sem resumo ganha o
+   buraco do vizinho que tem seis. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(var(--card-min), 100%), 1fr));
+  align-items: start;
+  gap: var(--gap);
 }
 
 .effort {
@@ -197,16 +331,12 @@ main {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 16px 16px 14px;
+  padding: 16px;
   cursor: pointer;
   transition: border-color 0.14s, transform 0.14s, box-shadow 0.14s;
-  /* Coluna flexível em vez de linhas fixas: o resumo é opcional e o card tem de
-     fechar igual com ele e sem ele. Quem estica é `.chips`, que empurra `.docs`
-     para a base. */
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  min-height: 148px;
+  gap: 10px;
   box-shadow: var(--shadow);
 }
 
@@ -223,12 +353,16 @@ main {
 .effort:focus-visible {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
   transform: translateY(-2px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 14px 30px -16px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--shadow-lift);
   outline: none;
 }
 
 .effort:focus-visible {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.effort:active {
+  transform: translateY(0);
 }
 
 .effort:hover::before,
@@ -282,11 +416,42 @@ main {
   font-weight: 600;
 }
 
+/* O título humano do map.md/PRD.md. O slug nomeia; a lede diz do que se trata. */
+.lede {
+  margin: -2px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* O primeiro parágrafo do documento, no próprio card.
+   Ele já morou num popup de hover — o que deixava o celular sem resumo nenhum, já que
+   não há hover para revelá-lo, e obrigava o board a posicionar um flutuante contra a
+   viewport na mão. Três linhas no card dizem o mesmo, dizem em qualquer dispositivo, e
+   não custam nada para manter. Quem quiser o resto abre o documento. */
+.blurb {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .bar {
   height: 3px;
   border-radius: 99px;
   background: var(--panel-3);
   overflow: hidden;
+  margin-top: auto;
 }
 
 .bar > i {
@@ -297,87 +462,22 @@ main {
   transition: width 0.3s ease;
 }
 
-/* O título humano do map.md/PRD.md. O slug nomeia; a lede diz do que se trata. */
-.lede {
-  margin: -4px 0 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
 .chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-content: flex-start;
-  flex: 1;
-}
-
-/* ---------- popup de resumo ---------- */
-
-.peek {
-  position: fixed;
-  z-index: 50;
-  width: min(420px, calc(100vw - 32px));
-  padding: 14px 16px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.28), 0 20px 44px -18px rgba(0, 0, 0, 0.75);
-  /* O popup acompanha o cursor até o card; capturar o mouse faria o hover piscar. */
-  pointer-events: none;
-  animation: fade 0.12s ease;
-}
-
-.peek h4 {
-  margin: 0 0 6px;
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1.4;
-}
-
-.peek p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--muted);
-}
-
-.peek-issues {
-  margin: 0;
-  padding-left: 18px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--muted);
-}
-
-.peek-issues .more {
-  list-style: none;
-  margin-left: -18px;
-  color: var(--faint);
-}
-
-.peek-foot {
-  margin-top: 10px;
-  padding-top: 9px;
-  border-top: 1px solid var(--line-soft);
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--faint);
 }
 
 .docs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   color: var(--faint);
   font-family: var(--mono);
   font-size: 11px;
-  padding-top: 11px;
+  padding-top: 10px;
   border-top: 1px solid var(--line-soft);
 }
 
@@ -388,7 +488,10 @@ main {
   font-size: 12px;
   color: var(--muted);
   text-decoration: none;
-  padding: 5px 10px;
+  padding: 0 12px;
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--panel-2);
@@ -416,9 +519,11 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   font-family: var(--mono);
   font-size: 13px;
   font-weight: 600;
+  word-break: break-all;
 }
 
 .pad-when {
@@ -440,6 +545,7 @@ main {
   align-items: center;
   gap: 10px;
   padding: 7px 8px;
+  min-height: var(--tap);
   margin: 0 -8px;
   border-radius: 6px;
   cursor: pointer;
@@ -482,6 +588,7 @@ main {
 .copy {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
   flex: none;
   padding: 2px 5px;
@@ -533,7 +640,8 @@ main {
 /* Com rótulo é ação de primeira classe, não affordance de hover: fica sempre visível. */
 .copy.labelled {
   opacity: 1;
-  padding: 5px 9px;
+  padding: 0 10px;
+  min-height: var(--tap);
   border-color: var(--line);
   background: var(--panel-2);
   max-width: 100%;
@@ -546,15 +654,26 @@ main {
   white-space: nowrap;
 }
 
+/* Sem hover não há como revelar o botão: ele fica visível, e cresce até caber o dedo. */
 @media (hover: none) {
   .copy {
     opacity: 1;
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+
+  .copy .ico::before {
+    font-size: 14px;
   }
 }
 
 /* ---------- prompts de skill ----------
 
-   O comando aparece literal e é o próprio alvo da cópia: você cola o que leu. */
+   O comando aparece literal e é o próprio alvo da cópia: você cola o que leu.
+
+   O comando manda no layout: ele ocupa a linha inteira e quebra por palavra, em vez de
+   rolar na horizontal dentro de uma faixa estreita. Ler o comando é o ponto — um trecho
+   escondido atrás de scroll lateral é um comando que você cola sem ter lido. */
 
 .prompts {
   display: grid;
@@ -565,9 +684,10 @@ main {
 .prompt {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   min-width: 0;
-  padding: 9px 10px 9px 12px;
+  padding: 10px 10px 10px 12px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-left: 2px solid var(--line);
@@ -581,11 +701,11 @@ main {
 }
 
 .prompt code {
-  font: 12.5px/1.5 var(--mono);
+  flex-basis: 100%;
+  font: 12.5px/1.55 var(--mono);
   color: var(--text);
-  white-space: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .prompt .hint {
@@ -593,50 +713,31 @@ main {
   min-width: 0;
   color: var(--faint);
   font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-@media (max-width: 760px) {
-  .prompt {
-    flex-wrap: wrap;
-  }
-  .prompt .hint {
-    flex-basis: 100%;
-  }
-}
-
-#drawer-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 14px 22px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-soft);
-}
-
-#drawer-actions .prompts {
-  margin-bottom: 0;
-  width: 100%;
-}
-
-/* Na gaveta o comando é longo (mapa + ticket): empilhar dá largura a ele em vez de
-   espremer a dica contra a borda. */
-#drawer-actions .prompt {
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-
-#drawer-actions .prompt code {
-  flex-basis: 100%;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-#drawer-actions .prompt .copy {
+.prompt .copy {
   margin-left: auto;
+}
+
+/* Com espaço, o comando volta a dividir a linha com a dica — a leitura fica numa
+   varredura só, e a lista de prompts fica curta. */
+@media (min-width: 900px) {
+  .prompt {
+    flex-wrap: nowrap;
+  }
+
+  .prompt code {
+    flex-basis: auto;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .prompt .hint {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* ---------- rótulos de status ---------- */
@@ -707,32 +808,77 @@ main {
 
 /* ---------- kanban ---------- */
 
+/* Flex, e não grid, porque a coluna vazia precisa **devolver a largura**.
+
+   Num grid, todo track recebe seu `1fr` mesmo que o conteúdo seja uma linha de rótulo:
+   um estágio zerado reservava um quarto da tela para não mostrar nada. No flex, a coluna
+   com issues cresce (`flex: 1`) e a vazia fica do tamanho do próprio rótulo.
+
+   Quantas colunas cabem lado a lado é a largura que decide — o `flex-basis` é o piso, o
+   `wrap` faz o resto, e a passagem de quatro para uma não tem degrau nem breakpoint. */
 .board {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
   align-items: start;
 }
 
-@media (max-width: 1000px) {
-  .board {
-    grid-template-columns: 1fr;
-  }
-}
+/* Por dentro, a coluna é uma grade fluida — não um fio único de cards.
 
+   As duas coisas são a mesma quando a coluna é estreita: cabe um card por linha, e o
+   empilhamento é o de sempre. A diferença aparece quando a coluna herda a largura que as
+   vazias devolveram — um esforço arquivado, onde só FECHADO tem issues, esticava cada
+   card para a largura da tela para escrever um título de seis palavras. Agora eles se
+   espalham, e a densidade acompanha o espaço em vez de brigar com ele. */
 .col {
+  flex: 1 1 var(--kcol-min);
+  min-width: min(var(--kcol-min), 100%);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr));
+  align-content: start;
+  gap: 8px;
   background: var(--bg-soft);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px;
-  min-height: 150px;
 }
 
+
+/* Coluna vazia não merece uma caixa nem uma coluna: encolhe até o rótulo. Some o
+   travessão e some a altura — num esforço arquivado, três estágios zerados ocupavam uma
+   tela inteira antes de a primeira issue fechada aparecer. Fica visível porque saber que
+   o estágio existe e está vazio é informação; deixa de custar espaço porque não é
+   informação que valha um quarto da tela. */
+.col.is-empty {
+  flex: 0 1 auto;
+  min-width: 0;
+  background: none;
+  border-style: dashed;
+  padding: 8px 12px;
+  opacity: 0.65;
+}
+
+.col.is-empty > header {
+  gap: 10px;
+}
+
+.col.is-empty > header {
+  padding-bottom: 0;
+}
+
+.col.is-empty .empty {
+  display: none;
+}
+
+/* O `grid-column` vem depois do `all: unset` de propósito: o reset apaga tudo o que foi
+   declarado antes dele, e o cabeçalho precisa atravessar a grade de cards da coluna. */
 .col > header {
   all: unset;
+  grid-column: 1 / -1;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 0 4px 12px;
   font-size: 11px;
   letter-spacing: 0.08em;
@@ -756,10 +902,10 @@ main {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 11px 12px;
-  margin-bottom: 8px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   gap: 9px;
   box-shadow: var(--shadow);
   transition: border-color 0.12s, transform 0.12s;
@@ -774,6 +920,10 @@ main {
 
 .card:focus-visible {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.card:active {
+  transform: translateY(0);
 }
 
 .card.is-blocked {
@@ -828,8 +978,8 @@ main {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 13px 16px;
-  margin-bottom: 18px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
   box-shadow: var(--shadow);
 }
 
@@ -838,17 +988,30 @@ main {
   background: color-mix(in srgb, var(--green) 7%, var(--panel));
 }
 
+/* A frase toma a linha inteira no estreito; com espaço, ela empurra os botões para a
+   direita. Um `margin-left: auto` no botão faria o mesmo, mas quebraria quando os
+   botões passam de dois. */
 .actionbar p {
-  margin: 0 auto 0 0;
+  margin: 0;
+  flex-basis: 100%;
   color: var(--muted);
   font-size: 13px;
+}
+
+@media (min-width: 640px) {
+  .actionbar p {
+    flex: 1;
+    flex-basis: auto;
+    margin-right: auto;
+  }
 }
 
 button.act {
   font: inherit;
   font-size: 12px;
   font-family: var(--mono);
-  padding: 7px 12px;
+  padding: 0 12px;
+  min-height: var(--tap);
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--panel-2);
@@ -888,15 +1051,14 @@ button.act.primary:hover {
   animation: fade 0.16s ease;
 }
 
-/* A largura é uma variável porque o usuário a arrasta: o JS escreve `--drawer-w` no
-   :root e o CSS obedece. O `min()` com `94vw` mantém a gaveta dentro da tela mesmo
-   quando a janela encolhe depois do arrasto. */
+/* No celular a gaveta é a tela: sobrar 6% de board atrás não serve para nada, e a alça
+   de arrasto não tem para onde arrastar. Do desktop para cima ela vira painel lateral, e
+   a largura passa a ser a variável que o arrasto escreve — com `min()` contra a viewport,
+   para que encolher a janela depois do arrasto não empurre a gaveta para fora. */
 #drawer {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(var(--drawer-w, 780px), 94vw);
+  inset: 0;
+  width: 100%;
   background: var(--panel);
   border-left: 1px solid var(--line);
   box-shadow: -24px 0 60px -30px rgba(0, 0, 0, 0.8);
@@ -904,6 +1066,43 @@ button.act.primary:hover {
   display: flex;
   flex-direction: column;
   animation: slide 0.18s ease;
+}
+
+#drawer-grip {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  #drawer {
+    inset: 0 0 0 auto;
+    width: min(var(--drawer-w, 780px), 94vw);
+  }
+
+  /* A alça de resize: 8px de área agarrável sobre a borda esquerda da gaveta. Fina o
+     bastante para não roubar clique do conteúdo, larga o bastante para o mouse pegar. */
+  #drawer-grip {
+    display: block;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 2;
+  }
+
+  #drawer-grip::before {
+    content: "";
+    position: absolute;
+    inset: 0 3px;
+    background: transparent;
+    transition: background 0.12s;
+  }
+
+  #drawer-grip:hover::before,
+  #drawer.resizing #drawer-grip::before {
+    background: var(--accent);
+  }
 }
 
 @keyframes fade {
@@ -919,12 +1118,19 @@ button.act.primary:hover {
   }
 }
 
+/* Durante o arrasto, nada de seleção de texto nem de hover atravessando o cursor. */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+
 .drawer-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
-  padding: 18px 22px;
+  gap: 8px;
+  padding: 14px var(--gutter);
+  padding-top: max(14px, env(safe-area-inset-top));
   border-bottom: 1px solid var(--line);
 }
 
@@ -934,34 +1140,27 @@ button.act.primary:hover {
   min-width: 0;
 }
 
+/* Duas linhas e para. Um título longo de PRD em fonte monoespaçada comia um quinto da
+   tela do celular antes de o documento começar — e o documento repete o título no `# `
+   logo abaixo. O que o cabeçalho precisa dar é âncora, não o texto inteiro. */
 .drawer-head h2 {
   margin: 4px 0 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
   font-family: var(--mono);
   font-size: 14px;
   font-weight: 600;
   word-break: break-word;
 }
 
-/* Link entre documentos do esforço: sublinhado, porque é navegação e não cópia. */
-.doclink {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.doclink:hover,
-.doclink:focus-visible {
-  text-decoration-color: var(--accent);
-  outline: none;
+/* O botão de copiar o título mora dentro do h2, e um `-webkit-box` o trataria como
+   texto — inline-flex o mantém alinhado sem sair do clamp. */
+.drawer-head h2 .copy {
+  vertical-align: middle;
+  margin-left: 4px;
 }
 
 .eyebrow {
@@ -971,13 +1170,18 @@ button.act.primary:hover {
 }
 
 button.icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
   background: none;
   border: 0;
   color: var(--faint);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
-  padding: 7px 9px;
   border-radius: var(--radius-sm);
   transition: background 0.12s, color 0.12s;
 }
@@ -987,43 +1191,45 @@ button.icon:hover {
   color: var(--text);
 }
 
-/* A alça de resize: 8px de área agarrável sobre a borda esquerda da gaveta. Fina o
-   bastante para não roubar clique do conteúdo, larga o bastante para o mouse pegar. */
-#drawer-grip {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -4px;
-  width: 8px;
-  cursor: col-resize;
-  z-index: 2;
+#drawer-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px var(--gutter);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-soft);
 }
 
-#drawer-grip::before {
-  content: "";
-  position: absolute;
-  inset: 0 3px;
-  background: transparent;
-  transition: background 0.12s;
+#drawer-actions .prompts {
+  margin-bottom: 0;
+  width: 100%;
 }
 
-#drawer-grip:hover::before,
-#drawer.resizing #drawer-grip::before {
-  background: var(--accent);
+/* Na gaveta o comando é longo (mapa + ticket) e o painel é estreito: aqui ele quebra
+   sempre, mesmo no desktop, onde a lista do board o manteria numa linha. */
+#drawer-actions .prompt {
+  flex-wrap: wrap;
 }
 
-/* Durante o arrasto, nada de seleção de texto nem de hover atravessando o cursor. */
-body.resizing {
-  user-select: none;
-  cursor: col-resize;
+#drawer-actions .prompt code {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: visible;
 }
 
 /* Sem `.md` o corpo é literal: rascunho de agente, log, JSON — texto que só faz
-   sentido byte a byte. Com `.md`, vira documento. */
+   sentido byte a byte. Com `.md`, vira documento.
+
+   `overscroll-behavior: contain` prende o embalo do dedo aqui dentro: sem ele, chegar ao
+   fim do documento continua rolando o board por trás da gaveta. */
 #drawer-body {
   margin: 0;
-  padding: 22px;
+  padding: var(--gutter);
+  padding-bottom: calc(var(--gutter) + env(safe-area-inset-bottom));
   overflow: auto;
+  overscroll-behavior: contain;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--mono);
@@ -1036,12 +1242,15 @@ body.resizing {
 /* ---------- markdown renderizado ---------- */
 
 /* Precisa do id: `#drawer-body` (0-1-0-0) venceria `.md` (0-0-1-0) e o documento
-   inteiro sairia monoespaçado, com os `\n` entre blocos virando linhas em branco. */
+   inteiro sairia monoespaçado, com os `\n` entre blocos virando linhas em branco.
+
+   `--fs-doc` é maior no celular que no desktop — é o único texto da página cujo trabalho
+   é ser lido de ponta a ponta, e no telefone isso se faz a um palmo do olho. */
 #drawer-body.md {
   white-space: normal;
   font-family: var(--sans);
-  font-size: 13.5px;
-  line-height: 1.65;
+  font-size: var(--fs-doc);
+  line-height: 1.68;
   color: var(--text);
 }
 
@@ -1062,25 +1271,25 @@ body.resizing {
 }
 
 .md h1 {
-  font-size: 19px;
+  font-size: calc(var(--fs-doc) + 5.5px);
 }
 
 .md h2 {
-  font-size: 15.5px;
+  font-size: calc(var(--fs-doc) + 2px);
   padding-bottom: 7px;
   border-bottom: 1px solid var(--line);
   color: var(--text);
 }
 
 .md h3 {
-  font-size: 14px;
+  font-size: calc(var(--fs-doc) + 0.5px);
   color: var(--muted);
 }
 
 .md h4,
 .md h5,
 .md h6 {
-  font-size: 13px;
+  font-size: var(--fs-doc);
   color: var(--muted);
 }
 
@@ -1155,14 +1364,16 @@ body.resizing {
 
 .md code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 0.87em;
   background: var(--panel-2);
   border: 1px solid var(--line-soft);
   border-radius: 5px;
   padding: 1px 5px;
   color: var(--text);
+  word-break: break-word;
 }
 
+/* O bloco de código rola dentro de si — a gaveta nunca rola na horizontal. */
 .md pre {
   margin: 0 0 14px;
   padding: 12px 14px;
@@ -1170,6 +1381,7 @@ body.resizing {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .md pre code {
@@ -1179,11 +1391,13 @@ body.resizing {
   font-size: 12px;
   line-height: 1.6;
   color: var(--muted);
+  word-break: normal;
 }
 
-/* A tabela rola dentro do próprio contêiner: a gaveta não pode rolar na horizontal. */
+/* Idem para a tabela. */
 .md .tablewrap {
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   margin: 0 0 14px;
 }
 
@@ -1211,15 +1425,24 @@ body.resizing {
 
 /* ---------- cabeçalho do documento ---------- */
 
+/* Chave e valor lado a lado exigem largura: no celular a chave vira rótulo em cima do
+   valor, em vez de espremer o `Blocked by:` numa coluna de dois dedos. */
 .md .meta {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 14px;
+  grid-template-columns: 1fr;
+  gap: 2px 14px;
   margin: 0 0 20px;
   padding: 12px 14px;
   background: var(--bg-soft);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
+}
+
+@media (min-width: 640px) {
+  .md .meta {
+    grid-template-columns: auto 1fr;
+    gap: 4px 14px;
+  }
 }
 
 .md .meta-row {
@@ -1244,7 +1467,33 @@ body.resizing {
   min-width: 0;
 }
 
+@media (max-width: 639px) {
+  .md .meta-v:not(:last-child) {
+    margin-bottom: 8px;
+  }
+}
+
 /* ---------- alvos do documento ---------- */
+
+/* Link entre documentos do esforço: sublinhado, porque é navegação e não cópia. */
+.doclink {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.doclink:hover,
+.doclink:focus-visible {
+  text-decoration-color: var(--accent);
+  outline: none;
+}
 
 /* Caminho de arquivo: clicar copia. Parece código porque é código — mas responde. */
 .ref {
@@ -1316,9 +1565,10 @@ body.resizing {
 
 #toast {
   position: fixed;
-  bottom: 26px;
+  bottom: calc(26px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
   background: var(--panel);
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
@@ -1345,62 +1595,6 @@ body.resizing {
   text-align: center;
 }
 
-/* ---------- telas estreitas ---------- */
-
-/* O que quebra primeiro é o topo: quatro elementos numa linha de 56px de altura. */
-@media (max-width: 900px) {
-  header {
-    height: auto;
-    min-height: 56px;
-    flex-wrap: wrap;
-    padding: 10px 16px;
-    gap: 8px 12px;
-  }
-
-  /* O contador é a informação mais dispensável do topo — sai antes do resto apertar. */
-  .tally {
-    display: none;
-  }
-
-  nav {
-    flex-basis: 100%;
-    order: 3;
-  }
-
-  main {
-    padding: 20px 16px 48px;
-  }
-
-  .section-head {
-    flex-wrap: wrap;
-  }
-
-  /* A gaveta ocupa a tela: sobrar 6% de board atrás não serve para nada, e a largura
-     arrastada (`--drawer-w`) deixa de fazer sentido quando não há espaço para arrastar. */
-  #drawer {
-    width: 100vw;
-  }
-
-  #drawer-grip {
-    display: none;
-  }
-
-  .drawer-head,
-  #drawer-actions,
-  #drawer-body {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-}
-
-/* Sem hover não há popup — o dispositivo não tem como mostrá-lo antes do toque. O
-   card já traz a lede; quem tocar entra no esforço e lê o documento. */
-@media (hover: none) {
-  .peek {
-    display: none;
-  }
-}
-
 /* ---------- grafo de dependências ---------- */
 
 /* Alternador de visão. Não é preferência guardada: mora no hash, como o resto da
@@ -1416,7 +1610,9 @@ body.resizing {
 }
 
 .viewswitch button {
-  padding: 5px 14px;
+  padding: 0 16px;
+  min-height: calc(var(--tap) - 4px);
+  font: inherit;
   font-size: 12px;
   color: var(--muted);
   background: transparent;
@@ -1430,9 +1626,15 @@ body.resizing {
   background: var(--panel-3);
 }
 
-/* O grafo rola na horizontal dentro de si — a página nunca. */
+/* O grafo é uma superfície de desktop: os nós têm largura fixa em pixels porque a
+   posição das curvas é calculada em cima dela. Num telefone ele não vira uma coluna —
+   ele continua sendo o mesmo desenho, e a leitura se faz arrastando.
+
+   O que o CSS garante é que esse arrasto aconteça *dentro* do contêiner: a página nunca
+   rola para o lado, e o `contain` impede que chegar à borda do grafo empurre o board. */
 .graph {
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   padding-bottom: 6px;
 }
 

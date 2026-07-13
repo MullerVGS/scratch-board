@@ -189,51 +189,15 @@ function statusChips(issues) {
 // ---------- visão geral ----------
 
 /**
- * O popup de "sobre o que é isto".
+ * O card diz do que o esforço se trata — no próprio card.
  *
- * `pos-2101-flapping-guard` não conta história nenhuma. O título e o primeiro parágrafo
- * do mapa (ou do PRD) contam — e o servidor já os traz junto do board, então lembrar o
- * assunto de um esforço não custa navegação nem request.
- *
- * É um elemento só, reposicionado, e não um popup por card: com trinta esforços na
- * grade, trinta popups ocultos seriam trinta pedaços de DOM para manter vivos à toa.
+ * `pos-2101-flapping-guard` não conta história nenhuma; o título e o primeiro parágrafo
+ * do mapa (ou do PRD) contam, e o servidor já os traz junto do board. Eles moraram num
+ * popup de hover, e o hover é a parte errada dessa frase: no celular não existe, e no
+ * desktop custava posicionar um flutuante contra a viewport na mão. Três linhas
+ * clampadas no card dizem o mesmo em qualquer dispositivo; quem quiser o resto abre o
+ * documento, que é para onde o card leva de qualquer jeito.
  */
-const peek = el('<div class="peek" hidden></div>')
-document.body.append(peek)
-
-function showPeek(anchor, e) {
-  // Esforço sem PRD nem mapa não tem resumo para dar — mas tem issues, e os títulos
-  // delas dizem do que se trata melhor que um popup vazio ou nenhum popup.
-  const body = e.blurb
-    ? `<p>${esc(e.blurb)}</p>`
-    : e.issues.length
-      ? `<ul class="peek-issues">${e.issues
-          .slice(0, 5)
-          .map((i) => `<li>${esc(cleanTitle(i))}</li>`)
-          .join('')}${e.issues.length > 5 ? `<li class="more">+${e.issues.length - 5} issues</li>` : ''}</ul>`
-      : ''
-  if (!body && !e.title) return
-
-  peek.innerHTML = `
-    ${e.title ? `<h4>${esc(e.title)}</h4>` : ''}
-    ${body}
-    <div class="peek-foot">${e.docs.length ? e.docs.map((d) => esc(d.name)).join(' · ') : 'sem documento'}</div>
-  `
-  peek.hidden = false
-
-  // Posiciona abaixo do card e prende na viewport: um popup que sai da tela não é popup.
-  const r = anchor.getBoundingClientRect()
-  const p = peek.getBoundingClientRect()
-  const top = r.bottom + 8 + p.height > innerHeight ? r.top - p.height - 8 : r.bottom + 8
-  peek.style.top = `${Math.max(8, top)}px`
-  peek.style.left = `${Math.min(Math.max(8, r.left), innerWidth - p.width - 8)}px`
-}
-
-const hidePeek = () => {
-  peek.hidden = true
-}
-addEventListener('scroll', hidePeek, true)
-
 function effortCard(e, archived = false) {
   const pct = e.total ? Math.round((e.closed / e.total) * 100) : 0
   const card = el(`
@@ -252,10 +216,7 @@ function effortCard(e, archived = false) {
   `)
   card.querySelector('h3').append(copyBtn(e.slug, 'slug'))
 
-  const open = () => {
-    hidePeek()
-    location.hash = `#/${archived ? 'archive/' : ''}${e.slug}`
-  }
+  const open = () => (location.hash = `#/${archived ? 'archive/' : ''}${e.slug}`)
   card.onclick = open
   card.onkeydown = (ev) => {
     if (ev.key === 'Enter' || ev.key === ' ') {
@@ -263,13 +224,6 @@ function effortCard(e, archived = false) {
       open()
     }
   }
-
-  // Mouse e teclado abrem o mesmo popup: quem navega por Tab também precisa lembrar
-  // do que se trata o esforço antes de decidir entrar nele.
-  card.onmouseenter = () => showPeek(card, e)
-  card.onfocus = () => showPeek(card, e)
-  card.onmouseleave = hidePeek
-  card.onblur = hidePeek
   return card
 }
 
@@ -632,8 +586,11 @@ function renderEffort(slug, archived, graph = false) {
     const boardEl = el('<div class="board"></div>')
     for (const col of board.columns) {
       const issues = effort.issues.filter((i) => i.column === col.id)
+      // Coluna zerada continua na tela — o estágio existe, e saber que está vazio é
+      // informação —, mas encolhe para uma faixa: a caixa de 150px com um travessão
+      // dentro empurrava o trabalho de verdade para baixo da dobra.
       const node = el(`
-        <div class="col">
+        <div class="col ${issues.length ? '' : 'is-empty'}">
           <header><span>${esc(col.label)}</span><span>${issues.length}</span></header>
         </div>
       `)
@@ -822,6 +779,9 @@ async function render(path, opts) {
   body.textContent = 'carregando…'
   body.classList.remove('md')
   drawer.hidden = scrim.hidden = false
+  // No celular a gaveta é a tela inteira: rolar o board por trás dela é rolar o que não
+  // se vê. No desktop a regra não se aplica — o board continua visível ao lado.
+  document.body.classList.add('locked')
   body.scrollTop = 0
 
   try {
@@ -855,6 +815,7 @@ function goBack() {
 
 const closeDrawer = () => {
   drawer.hidden = scrim.hidden = true
+  document.body.classList.remove('locked')
   trail.length = 0
   current = null
 }
