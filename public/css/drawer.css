@@ -199,3 +199,67 @@ button.icon:hover {
   color: var(--muted);
   flex: 1;
 }
+
+/* ---------- a gaveta viva ---------- */
+
+/* O conteúdo trocou sozinho — o agente salvou o arquivo que você está lendo.
+
+   A rolagem é preservada de propósito (é o ponto todo da gaveta viva), e o preço disso é
+   que a troca fica *invisível*: o parágrafo sob os seus olhos continua no mesmo lugar,
+   agora com outro texto. Este realce é a única pista de que ela aconteceu. Curto, e sem
+   deslocar nada — é `background`, não borda: um pixel de borda empurraria o documento
+   inteiro e desmentiria a rolagem que acabamos de preservar. */
+#drawer-body.swapped {
+  animation: swapped 1.1s ease-out;
+}
+
+@keyframes swapped {
+  from {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+}
+
+/* O arquivo aberto sumiu do disco.
+
+   Um `ENOENT` cru não é uma frase. E o que já estava na tela **fica**, abaixo do aviso:
+   jogá-lo fora seria punir quem lia pelo que o agente fez. O aviso diz o que o texto
+   virou — a última leitura de um arquivo que não existe mais.
+
+   Numa abertura o corpo está vazio e o aviso vira o próprio estado vazio, na linhagem do
+   `.empty` do `shell.css`. Âmbar, não vermelho: sumir não é erro do board, é um fato do
+   disco — e o board mostra o que o disco diz. */
+#drawer-body .gone {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  /* O corpo sem `.md` é `pre-wrap`: sem isto, a indentação do template viraria texto. */
+  white-space: normal;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--amber) 10%, var(--bg-soft));
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--line));
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#drawer-body .gone strong {
+  color: var(--amber);
+  font-weight: 650;
+}
+
+#drawer-body .gone span {
+  color: var(--faint);
+}
+
+#drawer-body .gone code {
+  max-width: 100%;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  word-break: break-all;
+}
