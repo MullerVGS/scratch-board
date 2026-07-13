@@ -3,8 +3,7 @@
  *
  * A gaveta é DOM puro (`public/drawer.js`) e não há harness de DOM neste projeto: zero
  * dependências, e um `jsdom` seria a primeira. O que ela *faz* — trocar o conteúdo
- * preservando a rolagem — só se prova dirigindo o navegador, e está provado na resposta
- * do ticket 07.
+ * preservando a rolagem — só se prova dirigindo o navegador de verdade, não aqui.
  *
  * O que se prova **aqui** é o que a gaveta *assume* sobre o mundo, porque é isso que
  * pode mudar debaixo dela sem ninguém perceber:

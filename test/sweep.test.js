@@ -140,11 +140,10 @@ test('com o watcher MORTO, a varredura pega a mudança que ele perdeu', async ()
     assert.equal(alpha.closed, 1)
 
     // E ela **sabe quais caminhos mexeram**, mesmo tendo perdido o evento que os carregava.
-    // O ticket 06 fechou com uma lista vazia aqui e a chamou de honesta — era o melhor que
-    // se podia dizer enquanto o `changed` vinha do watcher. Agora ele vem do **digest do
-    // conteúdo** (`cache.js`), que não depende de o kernel ter avisado: a varredura relê o
-    // disco e compara. Consequência prática: com o watcher morto, a **gaveta aberta se cura
-    // junto com o board** — era o buraco que o 06 registrou e passou adiante.
+    // Enquanto o `changed` viesse do watcher, o melhor que a varredura podia dizer aqui era
+    // uma lista vazia. Ele vem do **digest do conteúdo** (`cache.js`), que não depende de o
+    // kernel ter avisado: a varredura relê o disco e compara. Consequência prática: com o
+    // watcher morto, a **gaveta aberta se cura junto com o board**.
     assert.deepEqual(changed, [alvo])
   } finally {
     stream.close()

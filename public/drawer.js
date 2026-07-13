@@ -299,7 +299,7 @@ function flash(body) {
   void body.offsetWidth // reinicia a animação quando dois pushes chegam colados
   body.classList.add('swapped')
   // E sai quando acaba: uma classe que fica pendurada para sempre é o DOM mentindo que a
-  // troca acabou de acontecer — e foi o probe deste ticket que tropeçou nela.
+  // troca acabou de acontecer.
   body.addEventListener('animationend', () => body.classList.remove('swapped'), { once: true })
 }
 

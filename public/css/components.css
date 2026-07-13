@@ -306,7 +306,7 @@ button.act.primary:hover {
 
    Herda `button.icon` (tamanho, alvo de toque, hover), que hoje ainda mora no
    `drawer.css` por ter nascido lá. As nove folhas carregam todas, então ele já se
-   aplica aqui; mudá-lo de casa é arrumação do ticket 10, não deste. */
+   aplica aqui — mas o lugar dele é esta folha. Mover, não duplicar. */
 
 button.refresh {
   font-size: 14px;

@@ -1,21 +1,19 @@
 // O board em memória, e a única pergunta que autoriza um push: **mudou de verdade?**
 //
-// `buildBoard()` é "leia o disco agora" — sem estado, sem memória, sem cache. Isso é de
-// propósito, e a divisão é esta: o `board.js` sabe *como* montar a projeção, o cache
-// decide *quando* montá-la e se alguém precisa saber. Cache dentro do `board.js` fecharia
-// as duas coisas num nó só e a supressão deixaria de ser demonstrável.
+// `buildBoard()` é "leia o disco agora" — sem estado, sem memória, sem cache. É de
+// propósito: o `board.js` sabe *como* montar a projeção, o cache decide *quando* montá-la e
+// se alguém precisa saber. Cache dentro do `board.js` fecharia as duas coisas num nó só e a
+// supressão deixaria de ser demonstrável.
 //
 // **A supressão é o coração do push.** Um evento de disco não é uma mudança no board: um
-// `.swp` que aparece e some, um agente reescrevendo um arquivo com o conteúdo igual, um
-// `touch`, um diretório temporário. Todos mexem no `.scratch/` e nenhum muda um pixel do
-// que a tela mostra. Hoje todos viram re-render. Aqui, o board novo é serializado e
-// comparado com o que já foi empurrado: **byte-idêntico ⇒ ninguém é avisado.** Nenhum byte
-// no fio, nenhum re-render, nenhuma piscada.
+// `.swp` que nasce e some, uma reescrita com o conteúdo igual, um `touch`. Todos mexem no
+// `.scratch/` e nenhum muda um pixel do que a tela mostra. O board novo é serializado e
+// comparado com o que já foi empurrado: **byte-idêntico ⇒ ninguém é avisado.**
 //
-// É por isso que `effort.mtime` teve que sair do payload: era o `mtime` de um *diretório*,
-// que pula quando qualquer entrada nasce, morre ou é renomeada dentro dele — inclusive por
-// arquivo que o board nem projeta. No hash, ele moveria o hash sem o board mudar, e a
-// supressão viraria decoração.
+// Daí `effort.mtime` não poder voltar ao payload: o `mtime` de um *diretório* pula quando
+// qualquer entrada nasce, morre ou é renomeada dentro dele — inclusive por arquivo que o
+// board nem projeta. Ele moveria o hash sem o board mudar, e a supressão viraria decoração.
+// Vale para qualquer campo instável.
 
 import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
@@ -55,27 +53,22 @@ export async function refresh() {
 // O mesmo raciocínio, um andar abaixo. **O board e o arquivo são duas coisas diferentes**:
 // o board projeta `Status:`, título e `Blocked by:`, e nada do *corpo*. Escrever a
 // `## Answer` de uma issue não move o hash do board — e é justamente a mudança que interessa
-// a quem está lendo aquele arquivo na gaveta. Quem quer avisar sobre o arquivo precisa de um
-// sinal sobre o arquivo, e é isto aqui.
+// a quem está lendo aquele arquivo na gaveta. Avisar sobre o arquivo exige um sinal sobre o
+// arquivo, e é isto aqui.
 //
-// **Por que não usar a lista de caminhos do `watch.js`.** Ela é o que o kernel contou, e o
-// kernel conta menos do que se supõe: o `fs.watch` recursivo do Node **para de reportar um
-// nome depois que um `rename` troca o inode por baixo dele**. Medido, e é o caso que mais
-// importa — os agentes escrevem **atomicamente** (`.md.tmp.NNNN` + `rename` por cima), que é
-// exatamente o padrão que cega o watcher. Na prática: a **primeira** edição de um arquivo
-// aparece na lista; da segunda em diante, só o `.tmp` aparece, e o `.md` de verdade some do
-// relato. Confiar nessa lista para dizer *qual* arquivo mudou seria construir a gaveta viva
-// sobre areia — ela funcionaria uma vez por arquivo e depois calaria, que é a doença que
-// este board inteiro existe para não ter.
+// **Por que não usar a lista de caminhos do `watch.js`.** O `fs.watch` recursivo do Node
+// **para de reportar um nome depois que um `rename` troca o inode por baixo dele** — e é
+// assim que os agentes escrevem (`.md.tmp.NNNN` + `rename` por cima). A **primeira** edição
+// de um arquivo aparece na lista; da segunda em diante só o `.tmp` aparece, e o `.md` some
+// do relato do kernel. Construída sobre essa lista, a gaveta viva funcionaria uma vez por
+// arquivo e depois calaria — o pior modo de falha, porque *parece* funcionar.
 //
 // Então o watcher é **gatilho**, não testemunha: ele diz *que* o disco mexeu (para isso ele
 // basta, porque o `.tmp` sempre dispara algo), e quem diz *o quê* é o digest do conteúdo.
 //
-// E é o conteúdo, não a escrita. `fs.watch` fala de escrita: um `touch`, um agente
-// reescrevendo um `.md` com o texto idêntico, um `Write` que recria o inode com os mesmos
-// bytes. Nada disso mudou o que alguém está lendo, e emitir por eles desfaria, pela porta
-// dos fundos, a propriedade que o ticket 05 conquistou. Byte-idêntico ⇒ ninguém é avisado —
-// é o hash do board, um andar abaixo, e o análogo servidor do `shown` da gaveta.
+// E é o conteúdo, não a escrita. `fs.watch` fala de escrita: um `touch`, uma reescrita com
+// os mesmos bytes. Nada disso mudou o que alguém está lendo, e emitir por eles reintroduziria
+// pela porta dos fundos o barulho que o push veio matar.
 
 // Por arquivo: o carimbo (`size:mtime`) e o digest do conteúdo. **Os dois, e cada um faz uma
 // coisa.** O carimbo é o portão barato — um `stat` diz que o arquivo *não* foi escrito, e aí
@@ -93,7 +86,7 @@ const BIG = 512 * 1024
  *
  * O board **nunca projeta entrada oculta** (`listSlugs`), e a gaveta só abre o que o board
  * lhe entregou — então um `.swp` de editor não pode estar aberto em gaveta nenhuma, e o
- * caminho dele não tem por que viajar. Era ele que o ticket 05 provou não emitir byte algum.
+ * caminho dele não tem por que viajar.
  */
 async function walk(dir, out = []) {
   let entries = []

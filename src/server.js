@@ -81,17 +81,14 @@ const frame = (json, changed) => `data: {"changed":${JSON.stringify(changed)},"b
 /**
  * O evento do **arquivo**, não do board: só os caminhos, sem os 62 KB da projeção.
  *
- * Ele existe porque o board e o arquivo são duas coisas diferentes. O board projeta
- * `Status:`, título e `Blocked by:` — e **nada do corpo**. Um agente escrevendo a
- * `## Answer` do ticket que você tem aberto na gaveta não move um pixel do board, e sob a
- * supressão por hash isso era **silêncio** — exatamente no caso de uso que dá nome à gaveta
- * viva: *o agente está escrevendo o ticket que você está lendo*. A varredura de 90s também
- * não repescava, porque ela também pende do hash do board.
+ * O board projeta `Status:`, título e `Blocked by:` — e **nada do corpo**. Um agente
+ * escrevendo a `## Answer` do documento que você tem aberto na gaveta não move um pixel do
+ * board, e sob a supressão por hash isso seria **silêncio** — justamente no caso de uso que
+ * dá nome à gaveta viva: *o agente está escrevendo o que você está lendo*.
  *
- * A supressão continua certa: o board não mudou e não se redesenha. O que estava errado era
- * o **escopo** — o sinal da gaveta é "*o arquivo* mudou", e ele vivia pendurado no sinal "*o
- * board* mudou". A lista `changed` é um fato sobre o disco, apurado pelo `watch.js`, e era
- * jogada fora justamente nos casos que interessam a quem lê.
+ * A supressão do board continua certa (ele não mudou, não se redesenha). O que não pode
+ * acontecer é o sinal "*o arquivo* mudou" ficar pendurado no sinal "*o board* mudou": são
+ * dois escopos, e colapsá-los cega a gaveta.
  */
 const fileFrame = (changed) => `event: files\ndata: {"changed":${JSON.stringify(changed)}}\n\n`
 
@@ -110,9 +107,9 @@ function broadcast(json, changed) {
  *
  * Duas supressões, independentes de propósito: o `refresh()` diz se o **board** mudou — é
  * ele que autoriza redesenhar a tela; o `movedFiles()` diz quais **arquivos** mudaram de
- * conteúdo — é ele que autoriza avisar quem está lendo um deles. Colapsar as duas numa só
- * era o bug: o board não projeta uma linha do corpo dos arquivos, então a `## Answer` que o
- * agente escrevia no ticket aberto na sua gaveta não movia o hash, e ninguém era avisado.
+ * conteúdo — é ele que autoriza avisar quem está lendo um deles. **Colapsar as duas numa só
+ * cega a gaveta**: o board não projeta uma linha do corpo dos arquivos, então o corpo que o
+ * agente escreve não move o hash, e ninguém seria avisado.
  *
  * **Ocioso continua custando zero.** Nada aqui roda por relógio: o `sync()` só acontece
  * quando o watcher fala, quando a varredura de 90s passa ou quando alguém pede o board.
@@ -219,9 +216,9 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
     sync().catch(() => { /* o disco piscou; a varredura de segurança repesca */ })
   })
 
-  // E a varredura de 90s não empurra mais só o board: como o `changed` sai do digest e não
-  // do watcher, ela também sabe **quais** arquivos mudaram — então, com o watcher morto, a
-  // gaveta aberta se cura junto com o board. Era o buraco que o ticket 06 deixou registrado.
+  // A varredura não empurra só o board: como o `changed` sai do digest e não do watcher, ela
+  // também sabe **quais** arquivos mudaram — então, com o watcher morto, a gaveta aberta se
+  // cura junto com o board.
   const sweeper = setInterval(() => {
     sync().catch(() => { /* a próxima volta repesca — a varredura não desiste */ })
   }, sweep)

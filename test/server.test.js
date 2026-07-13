@@ -212,7 +212,7 @@ test('um arquivo que o board não projeta (.swp) NÃO empurra nada', async () =>
     //
     // E nem sequer um `files`: o disco de fato mexeu, mas um caminho **oculto** não pode
     // estar aberto em gaveta nenhuma (o board nunca projeta entrada oculta). Aqui o evento
-    // dos caminhos poderia desfazer, pela porta dos fundos, a supressão que o 05 conquistou.
+    // dos caminhos desfaria, pela porta dos fundos, a supressão que o push existe para ter.
     await put('alpha/issues/.02-dois.md.swp', 'lixo de editor')
     await rm(join(root, 'alpha/issues/.02-dois.md.swp'))
     await stream.silence()
@@ -300,9 +300,9 @@ test('a SEGUNDA escrita atômica do mesmo arquivo também chega — o watcher pe
 
 test('reescrever o CORPO com bytes idênticos não emite nem `files` — a supressão do arquivo', async () => {
   // O `fs.watch` fala de **escrita**, não de conteúdo: reescrever o mesmo texto É uma
-  // escrita e ele a vê. Se o evento novo confiasse nele, um agente que salva um `.md` sem
-  // mudar nada acordaria toda gaveta aberta — e a propriedade que o 05 conquistou (mudança
-  // sem efeito não emite byte nenhum) morreria pela porta dos fundos do evento `files`.
+  // escrita e ele a vê. Se o evento `files` confiasse nele, um agente que salva um `.md` sem
+  // mudar nada acordaria toda gaveta aberta — e a propriedade central do push (mudança sem
+  // efeito não emite byte nenhum) morreria pela porta dos fundos.
   //
   // O caminho só viaja se o **conteúdo** mudou. É o hash do board, um andar abaixo.
   const mesmo = 'Status: resolved\nType: task\n\n# 02 — Dois\n\n## Answer\n\nA resposta, e ela não muda mais.\n'
@@ -359,7 +359,7 @@ test('fechar um ticket que bloqueia outro desbloqueia o outro no board empurrado
   const antes = effortOf(await board(), 'bloqueio')
   const preso = antes.issues.find((i) => i.number === '02')
   assert.equal(preso.blocked, true)
-  // O contrato do payload (ticket 02): `{ number, note, raw }`, e nada mais.
+  // O contrato do payload: `{ number, note, raw }`, e nada mais — campo que vaze move o hash.
   assert.deepEqual(Object.keys(preso.blockedBy[0]).sort(), ['note', 'number', 'raw'])
   assert.equal(preso.blockedBy[0].number, '01')
   // A nota é tudo que vem depois do número, como o autor escreveu — travessão incluído.
