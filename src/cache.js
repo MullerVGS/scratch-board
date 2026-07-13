@@ -18,8 +18,11 @@
 // supressão viraria decoração.
 
 import { createHash } from 'node:crypto'
+import { readFile, readdir, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { buildBoard } from './board.js'
+import { SCRATCH } from './paths.js'
 
 const hashOf = (json) => createHash('sha1').update(json).digest('hex')
 
@@ -45,4 +48,115 @@ export async function refresh() {
   const changed = next !== hash
   hash = next
   return { json, hash, changed }
+}
+
+// ---------- a supressão do arquivo ----------
+//
+// O mesmo raciocínio, um andar abaixo. **O board e o arquivo são duas coisas diferentes**:
+// o board projeta `Status:`, título e `Blocked by:`, e nada do *corpo*. Escrever a
+// `## Answer` de uma issue não move o hash do board — e é justamente a mudança que interessa
+// a quem está lendo aquele arquivo na gaveta. Quem quer avisar sobre o arquivo precisa de um
+// sinal sobre o arquivo, e é isto aqui.
+//
+// **Por que não usar a lista de caminhos do `watch.js`.** Ela é o que o kernel contou, e o
+// kernel conta menos do que se supõe: o `fs.watch` recursivo do Node **para de reportar um
+// nome depois que um `rename` troca o inode por baixo dele**. Medido, e é o caso que mais
+// importa — os agentes escrevem **atomicamente** (`.md.tmp.NNNN` + `rename` por cima), que é
+// exatamente o padrão que cega o watcher. Na prática: a **primeira** edição de um arquivo
+// aparece na lista; da segunda em diante, só o `.tmp` aparece, e o `.md` de verdade some do
+// relato. Confiar nessa lista para dizer *qual* arquivo mudou seria construir a gaveta viva
+// sobre areia — ela funcionaria uma vez por arquivo e depois calaria, que é a doença que
+// este board inteiro existe para não ter.
+//
+// Então o watcher é **gatilho**, não testemunha: ele diz *que* o disco mexeu (para isso ele
+// basta, porque o `.tmp` sempre dispara algo), e quem diz *o quê* é o digest do conteúdo.
+//
+// E é o conteúdo, não a escrita. `fs.watch` fala de escrita: um `touch`, um agente
+// reescrevendo um `.md` com o texto idêntico, um `Write` que recria o inode com os mesmos
+// bytes. Nada disso mudou o que alguém está lendo, e emitir por eles desfaria, pela porta
+// dos fundos, a propriedade que o ticket 05 conquistou. Byte-idêntico ⇒ ninguém é avisado —
+// é o hash do board, um andar abaixo, e o análogo servidor do `shown` da gaveta.
+
+// Por arquivo: o carimbo (`size:mtime`) e o digest do conteúdo. **Os dois, e cada um faz uma
+// coisa.** O carimbo é o portão barato — um `stat` diz que o arquivo *não* foi escrito, e aí
+// não se lê nada. O digest é quem decide: escrita não é mudança, e um `touch` ou uma
+// reescrita com os mesmos bytes têm carimbo novo e conteúdo igual. Sem o digest, o board
+// voltaria a emitir por relógio de filesystem; sem o carimbo, ele leria a árvore inteira a
+// cada rajada para descobrir que quase nada mudou.
+const seen = new Map()
+
+/** Arquivo grande a gaveta nem exibe (o servidor manda o tamanho). Não se lê um PNG para saber que ele mexeu. */
+const BIG = 512 * 1024
+
+/**
+ * Os arquivos que a gaveta pode ter aberto: tudo sob o root, menos o oculto.
+ *
+ * O board **nunca projeta entrada oculta** (`listSlugs`), e a gaveta só abre o que o board
+ * lhe entregou — então um `.swp` de editor não pode estar aberto em gaveta nenhuma, e o
+ * caminho dele não tem por que viajar. Era ele que o ticket 05 provou não emitir byte algum.
+ */
+async function walk(dir, out = []) {
+  let entries = []
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch { return out /* sumiu no meio da varredura, ou nunca existiu */ }
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue
+    const path = join(dir, e.name)
+    if (e.isDirectory()) await walk(path, out)
+    else if (e.isFile()) out.push(path)
+  }
+  return out
+}
+
+/**
+ * Quais arquivos **de fato** mudaram de conteúdo desde a última olhada.
+ *
+ * Varre o disco e digere — como o `buildBoard()`, é "leia o disco agora", e só roda quando
+ * alguém pergunta: no gatilho do watcher e na varredura de segurança. **Ocioso não varre**,
+ * e é isso que mantém o ocioso em zero.
+ *
+ * Sumiço conta como mudança: quem estava lendo o arquivo precisa saber que ele não existe
+ * mais. E arquivo novo também — **no escuro, avisa-se**. A assimetria é deliberada: um
+ * evento a mais custa algumas centenas de bytes e a gaveta o descarta; um evento a menos é
+ * silêncio, e silêncio é o modo de falha que o push existe para eliminar.
+ */
+export async function movedFiles() {
+  const files = await walk(SCRATCH)
+  const moved = []
+  const vivos = new Set()
+
+  for (const path of files) {
+    let info
+    try {
+      const { size, mtimeMs } = await stat(path)
+      const stamp = `${size}:${mtimeMs}`
+      const prev = seen.get(path)
+      vivos.add(path)
+      if (prev?.stamp === stamp) continue // não foi escrito: não se lê
+      const digest = size > BIG ? `big:${stamp}` : hashOf(await readFile(path))
+      info = { stamp, digest }
+      if (prev?.digest !== digest) moved.push(path)
+    } catch {
+      continue // nasceu e morreu no meio da varredura
+    }
+    seen.set(path, info)
+  }
+  for (const path of seen.keys()) {
+    if (vivos.has(path)) continue
+    seen.delete(path)
+    moved.push(path) // sumiu: quem o estava lendo precisa saber
+  }
+  return moved
+}
+
+/**
+ * A primeira olhada, no `start()`: o disco de agora não é novidade nenhuma.
+ *
+ * Sem ela, a primeira rajada acharia que **todo** arquivo do `.scratch/` acabou de mudar
+ * (nunca os vira) e empurraria uma lista de cento e quarenta caminhos. Com ela, o servidor
+ * nasce sabendo o que está lá — e o que mudar depois é mudança de verdade.
+ */
+export async function seed() {
+  await movedFiles()
 }

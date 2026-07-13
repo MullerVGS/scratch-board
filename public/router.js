@@ -67,5 +67,17 @@ export function connect() {
     dispatchEvent(new CustomEvent('board:push', { detail: { changed } }))
   }
 
+  // O disco mexeu e o board **não** — que é o caso mais comum de todos, porque o board
+  // projeta `Status:`, título e `Blocked by:`, e nada do corpo. Escrever a `## Answer` de
+  // uma issue não move um pixel da tela do board, mas move o documento que você está lendo.
+  //
+  // O evento `files` traz **só os caminhos** (nem o board, nem um diff dele) e é publicado
+  // no mesmo `board:push`: a gaveta escuta esse evento, olha o `changed`, e não lhe importa
+  // qual dos dois frames o produziu. Aqui não se chama `route()` — o board não mudou, e
+  // redesenhar a tela sem motivo é a doença que o push veio curar.
+  source.addEventListener('files', (ev) => {
+    dispatchEvent(new CustomEvent('board:push', { detail: JSON.parse(ev.data) }))
+  })
+
   return source
 }

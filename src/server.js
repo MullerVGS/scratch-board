@@ -16,7 +16,7 @@ import { resolve, extname, sep } from 'node:path'
 
 import { SCRATCH, PADS } from './paths.js'
 import { listPads } from './pads.js'
-import { refresh } from './cache.js'
+import { refresh, movedFiles, seed } from './cache.js'
 import { watchTree } from './watch.js'
 
 const PORT = Number(process.env.PORT ?? 7777)
@@ -78,21 +78,50 @@ const clients = new Set()
 // descobre que o documento aberto é justamente o que o agente acabou de escrever.
 const frame = (json, changed) => `data: {"changed":${JSON.stringify(changed)},"board":${json}}\n\n`
 
+/**
+ * O evento do **arquivo**, não do board: só os caminhos, sem os 62 KB da projeção.
+ *
+ * Ele existe porque o board e o arquivo são duas coisas diferentes. O board projeta
+ * `Status:`, título e `Blocked by:` — e **nada do corpo**. Um agente escrevendo a
+ * `## Answer` do ticket que você tem aberto na gaveta não move um pixel do board, e sob a
+ * supressão por hash isso era **silêncio** — exatamente no caso de uso que dá nome à gaveta
+ * viva: *o agente está escrevendo o ticket que você está lendo*. A varredura de 90s também
+ * não repescava, porque ela também pende do hash do board.
+ *
+ * A supressão continua certa: o board não mudou e não se redesenha. O que estava errado era
+ * o **escopo** — o sinal da gaveta é "*o arquivo* mudou", e ele vivia pendurado no sinal "*o
+ * board* mudou". A lista `changed` é um fato sobre o disco, apurado pelo `watch.js`, e era
+ * jogada fora justamente nos casos que interessam a quem lê.
+ */
+const fileFrame = (changed) => `event: files\ndata: {"changed":${JSON.stringify(changed)}}\n\n`
+
 function broadcast(json, changed) {
   const payload = frame(json, changed)
   for (const res of clients) res.write(payload)
 }
 
 /**
- * Relê o disco e empurra — **se, e só se, o board mudou**.
+ * Relê o disco e empurra — o board **se, e só se, ele mudou**; os caminhos, se algum arquivo
+ * mudou e o board não.
  *
- * É o único caminho que emite. Serve tanto o watcher quanto o `/api/board`: uma releitura
+ * É o único caminho que emite. Serve o watcher, a varredura e o `/api/board`: uma releitura
  * por HTTP que descobre uma mudança também avisa as outras abas, em vez de guardar a
  * novidade para si e deixar o hash mentir para o resto do mundo.
+ *
+ * Duas supressões, independentes de propósito: o `refresh()` diz se o **board** mudou — é
+ * ele que autoriza redesenhar a tela; o `movedFiles()` diz quais **arquivos** mudaram de
+ * conteúdo — é ele que autoriza avisar quem está lendo um deles. Colapsar as duas numa só
+ * era o bug: o board não projeta uma linha do corpo dos arquivos, então a `## Answer` que o
+ * agente escrevia no ticket aberto na sua gaveta não movia o hash, e ninguém era avisado.
+ *
+ * **Ocioso continua custando zero.** Nada aqui roda por relógio: o `sync()` só acontece
+ * quando o watcher fala, quando a varredura de 90s passa ou quando alguém pede o board.
+ * Disco parado ⇒ board igual, digests iguais ⇒ **0 evento, 0 byte**.
  */
-async function sync(changed = []) {
-  const { json, changed: moved } = await refresh()
+async function sync() {
+  const [{ json, changed: moved }, changed] = await Promise.all([refresh(), movedFiles()])
   if (moved) broadcast(json, changed)
+  else if (changed.length) for (const res of clients) res.write(fileFrame(changed))
   return json
 }
 
@@ -174,15 +203,25 @@ async function handler(req, res) {
  * falha que a varredura existe para cobrir, e é como ela se torna demonstrável em vez de
  * prometida — um watcher morto é exatamente isto.
  */
-export function start(port = PORT, { sweep = SWEEP_MS } = {}) {
+export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
+  // O disco de agora não é novidade: o servidor nasce sabendo o que está lá.
+  await seed()
+
   const server = createServer(handler)
-  const unwatch = watchTree(SCRATCH, (paths) => {
-    sync(paths).catch(() => { /* o disco piscou; a varredura de segurança repesca */ })
+
+  // O watcher é **gatilho**, não testemunha — a lista de caminhos que ele entrega fica onde
+  // está, e o `sync()` apura por conta própria o que mudou. O `fs.watch` recursivo do Node
+  // para de reportar um nome depois que um `rename` troca o inode por baixo dele, e é assim
+  // que os agentes escrevem (tmp + rename): da segunda edição em diante, o arquivo de
+  // verdade some do relato do kernel. Ele basta para dizer *que* algo mexeu; quem diz *o
+  // quê* é o digest (`cache.js`).
+  const unwatch = watchTree(SCRATCH, () => {
+    sync().catch(() => { /* o disco piscou; a varredura de segurança repesca */ })
   })
 
-  // A varredura empurra com `changed` vazio, e é honesto: se o watcher perdeu o evento,
-  // ninguém aqui sabe *quais* caminhos mexeram. O board vem inteiro e certo; o que a
-  // varredura não pode é inventar uma lista de caminhos que ela não viu.
+  // E a varredura de 90s não empurra mais só o board: como o `changed` sai do digest e não
+  // do watcher, ela também sabe **quais** arquivos mudaram — então, com o watcher morto, a
+  // gaveta aberta se cura junto com o board. Era o buraco que o ticket 06 deixou registrado.
   const sweeper = setInterval(() => {
     sync().catch(() => { /* a próxima volta repesca — a varredura não desiste */ })
   }, sweep)

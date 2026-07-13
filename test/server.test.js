@@ -25,7 +25,7 @@
  */
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rename, rm, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -47,7 +47,12 @@ const issue = (title, status, extra = '') =>
 
 /**
  * O stream SSE, lido com o `fetch` nativo — sem `EventSource` (que é do browser) e sem
- * biblioteca. Um frame é o texto até a linha em branco; só as linhas `data: ` interessam.
+ * biblioteca. Um frame é o texto até a linha em branco; as linhas `data: ` carregam o
+ * payload e a linha `event: ` (quando existe) o nome — sem ela, o SSE chama `message`.
+ *
+ * **O nome importa e é asserção**: `message` carrega o board inteiro; `files` carrega só os
+ * caminhos que mexeram no disco, e é o que avisa a gaveta de uma edição que o board não vê.
+ * Cada evento chega aqui como `{ event, ...payload }`.
  */
 async function openStream() {
   const ac = new AbortController()
@@ -71,13 +76,14 @@ async function openStream() {
         while ((cut = buf.indexOf('\n\n')) >= 0) {
           const frame = buf.slice(0, cut)
           buf = buf.slice(cut + 2)
-          const data = frame
-            .split('\n')
+          const lines = frame.split('\n')
+          const data = lines
             .filter((l) => l.startsWith('data: '))
             .map((l) => l.slice(6))
             .join('\n')
           if (!data) continue // `retry:` e os `: ping` não são eventos
-          queue.push(JSON.parse(data))
+          const named = lines.find((l) => l.startsWith('event: '))
+          queue.push({ event: named ? named.slice(7) : 'message', ...JSON.parse(data) })
           wake?.()
           wake = null
         }
@@ -162,7 +168,8 @@ test('escrever um .md empurra um board novo, e ele reflete a mudança', async ()
   try {
     await put('alpha/issues/02-dois.md', issue('02 — Dois', 'resolved'))
 
-    const { board: pushed, changed } = await stream.next()
+    const { event, board: pushed, changed } = await stream.next()
+    assert.equal(event, 'message', 'o board mudou: o evento tem que ser o que carrega o board')
     const alpha = effortOf(pushed, 'alpha')
     assert.equal(alpha.closed, 2)
     assert.equal(alpha.archivable, true)
@@ -202,8 +209,109 @@ test('um arquivo que o board não projeta (.swp) NÃO empurra nada', async () =>
   try {
     // Ele mexe no `mtime` do diretório do esforço — que é exatamente o campo que saiu do
     // payload. Se ele voltasse, este teste falharia, e a supressão seria decoração.
+    //
+    // E nem sequer um `files`: o disco de fato mexeu, mas um caminho **oculto** não pode
+    // estar aberto em gaveta nenhuma (o board nunca projeta entrada oculta). Aqui o evento
+    // dos caminhos poderia desfazer, pela porta dos fundos, a supressão que o 05 conquistou.
     await put('alpha/issues/.02-dois.md.swp', 'lixo de editor')
     await rm(join(root, 'alpha/issues/.02-dois.md.swp'))
+    await stream.silence()
+  } finally {
+    stream.close()
+  }
+})
+
+test('escrever só o CORPO de um .md emite um evento `files` — os caminhos, e nenhum board', async () => {
+  // O caso de uso que dá nome à gaveta viva: o agente está escrevendo o ticket que você
+  // está lendo. O cabeçalho não muda, então o **board** não muda — e antes deste evento o
+  // servidor calava, com toda a razão do hash e nenhuma razão de quem estava lendo.
+  const header = 'Status: resolved\nType: task\n\n# 02 — Dois\n\n'
+  const alvo = join(root, 'alpha/issues/02-dois.md')
+
+  const stream = await openStream()
+  try {
+    await put('alpha/issues/02-dois.md', `${header}## Answer\n\nDuzentas linhas de resposta.\n`)
+
+    const ev = await stream.next()
+    assert.equal(ev.event, 'files', 'a edição de corpo tem que emitir o evento dos caminhos')
+    assert.ok(ev.changed.includes(alvo), 'o evento tem que dizer QUAL arquivo mudou')
+    // Só os caminhos: o board não viaja aqui. São centenas de bytes, não os 62 KB da
+    // projeção — e mandá-la seria mentir que a tela precisa se redesenhar.
+    assert.equal('board' in ev, false, 'o evento `files` não pode carregar o board')
+
+    // E é **um** evento: o board não mudou, então nenhum `message` o segue.
+    assert.equal(await stream.count(400), 0)
+
+    // O board continua exatamente o mesmo — a supressão por hash não foi ferida, ela só
+    // deixou de ser o único sinal do mundo.
+    assert.equal(effortOf(await board(), 'alpha').closed, 2)
+  } finally {
+    stream.close()
+  }
+})
+
+test('a SEGUNDA escrita atômica do mesmo arquivo também chega — o watcher perde o nome, o digest não', async () => {
+  // O caso que derruba a prescrição ingênua, e é justamente **como os agentes escrevem**:
+  // grava um `arquivo.md.tmp.NNNN` e faz `rename` por cima do alvo. O `fs.watch` recursivo
+  // do Node para de reportar o nome depois que o `rename` troca o inode por baixo dele —
+  // medido: a primeira edição aparece na lista de caminhos do kernel, a segunda vem só com
+  // o `.tmp`, e o `.md` de verdade some do relato.
+  //
+  // Se o `changed` saísse do watcher, a gaveta viva funcionaria **uma vez por arquivo** e
+  // depois calaria em silêncio — pior que não existir, porque pareceria funcionar. Ele sai
+  // do digest do conteúdo, e o watcher serve só de **gatilho**: cada `.tmp` é um nome novo,
+  // e nome novo o kernel sempre reporta.
+  //
+  // O arquivo é só deste teste de propósito: o mesmo `rename` que cega o watcher para o
+  // nome cega-o para **as escritas diretas** seguintes (`writeFile` sem tmp), e os outros
+  // testes escrevem assim. É o mesmo fato do parágrafo acima, visto do outro lado.
+  const alvo = join(root, 'alpha/issues/03-atomica.md')
+  const header = 'Status: resolved\nType: task\n\n# 03 — Atômica\n\n'
+
+  const atomica = async (corpo) => {
+    const tmp = `${alvo}.tmp.${Math.random().toString(16).slice(2)}`
+    await writeFile(tmp, header + corpo)
+    await rename(tmp, alvo)
+  }
+
+  const stream = await openStream()
+  try {
+    // A primeira escrita cria a issue: o board muda, e quem vai é o board.
+    await atomica('O corpo original.\n')
+    assert.equal((await stream.next()).event, 'message')
+
+    // Da segunda em diante é só corpo — e é aqui que o watcher já perdeu o nome do arquivo.
+    for (const corpo of ['## Answer\n\nPrimeira versão.\n', '## Answer\n\nSegunda, por cima.\n']) {
+      await atomica(corpo)
+
+      const ev = await stream.next()
+      assert.equal(ev.event, 'files')
+      assert.ok(
+        ev.changed.includes(alvo),
+        `a edição atômica sumiu do \`changed\`: ${JSON.stringify(ev.changed)}`,
+      )
+      // O `.tmp` nasceu e morreu: ele não é documento de ninguém e não viaja.
+      assert.equal(ev.changed.length, 1, 'só o arquivo de verdade viaja — nem o .tmp, nem mais nada')
+    }
+  } finally {
+    stream.close()
+  }
+})
+
+test('reescrever o CORPO com bytes idênticos não emite nem `files` — a supressão do arquivo', async () => {
+  // O `fs.watch` fala de **escrita**, não de conteúdo: reescrever o mesmo texto É uma
+  // escrita e ele a vê. Se o evento novo confiasse nele, um agente que salva um `.md` sem
+  // mudar nada acordaria toda gaveta aberta — e a propriedade que o 05 conquistou (mudança
+  // sem efeito não emite byte nenhum) morreria pela porta dos fundos do evento `files`.
+  //
+  // O caminho só viaja se o **conteúdo** mudou. É o hash do board, um andar abaixo.
+  const mesmo = 'Status: resolved\nType: task\n\n# 02 — Dois\n\n## Answer\n\nA resposta, e ela não muda mais.\n'
+  const stream = await openStream()
+  try {
+    await put('alpha/issues/02-dois.md', mesmo)
+    assert.equal((await stream.next()).event, 'files') // a mudança de verdade, que chega
+
+    await put('alpha/issues/02-dois.md', mesmo) // e agora a mesma coisa, de novo
     await stream.silence()
   } finally {
     stream.close()

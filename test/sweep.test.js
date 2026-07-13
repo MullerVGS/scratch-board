@@ -131,7 +131,7 @@ test('com o watcher MORTO, a varredura pega a mudança que ele perdeu', async ()
     // e o board mostraria dados velhos com cara de vivos, para sempre. É a doença.
     server.stopWatch()
 
-    await put('alpha/issues/02-dois.md', issue('02 — Dois', 'resolved'))
+    const alvo = await put('alpha/issues/02-dois.md', issue('02 — Dois', 'resolved'))
 
     // Nenhum evento de watch vai chegar. Quem tem que empurrar é a varredura, sozinha.
     const { board: pushed, changed } = await stream.next()
@@ -139,9 +139,13 @@ test('com o watcher MORTO, a varredura pega a mudança que ele perdeu', async ()
     assert.equal(alpha.total, 2, 'a varredura empurrou um board velho')
     assert.equal(alpha.closed, 1)
 
-    // Ela não sabe *quais* caminhos mexeram — o evento que os carregava é justamente o
-    // que se perdeu. Então ela não inventa: manda o board inteiro e uma lista vazia.
-    assert.deepEqual(changed, [])
+    // E ela **sabe quais caminhos mexeram**, mesmo tendo perdido o evento que os carregava.
+    // O ticket 06 fechou com uma lista vazia aqui e a chamou de honesta — era o melhor que
+    // se podia dizer enquanto o `changed` vinha do watcher. Agora ele vem do **digest do
+    // conteúdo** (`cache.js`), que não depende de o kernel ter avisado: a varredura relê o
+    // disco e compara. Consequência prática: com o watcher morto, a **gaveta aberta se cura
+    // junto com o board** — era o buraco que o 06 registrou e passou adiante.
+    assert.deepEqual(changed, [alvo])
   } finally {
     stream.close()
   }
