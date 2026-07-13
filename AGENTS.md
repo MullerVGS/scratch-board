@@ -18,7 +18,15 @@ Se for adicionar recurso, mantenha a propriedade: **nada de estado que não este
 docker compose up -d      # http://localhost:7777 (só loopback)
 ```
 
-`server.js` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta.
+`src/`, `shared/` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta.
+
+## Os módulos do servidor
+
+O lado servidor vive em `src/`, um assunto por arquivo: `board.js` monta a projeção do `.scratch/` (esforços, issues, arestas de bloqueio), `pads.js` lê os scratchpads de sessão, `paths.js` guarda os roots e a tradução `path`/`ref`, e `server.js` **só fala HTTP** — rotas, estáticos e `safePath()`. O parser não mora aqui: ele é `shared/doc.js`, porque o browser também o importa.
+
+`paths.js` existe por uma razão mecânica: se `refOf()` morasse no `server.js`, `board.js` e `pads.js` o importariam de volta — ciclo.
+
+Os três diretórios são montados **como diretório**, nunca arquivo a arquivo. O compose já montou `./server.js:/app/server.js`, e o preço apareceu no primeiro módulo novo: os testes passavam no host enquanto o container subia com código velho — ou estourava no import — porque ninguém lembrou de somar o arquivo ao `docker-compose.yml` e ao `Dockerfile`. Módulo novo em `src/` passa a valer sem tocar em nenhum dos dois.
 
 ## Stack
 

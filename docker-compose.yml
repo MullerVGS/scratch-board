@@ -11,8 +11,11 @@ services:
       - ../.scratch:/workspace/.scratch:ro
       # Scratchpads de sessão dos agentes. Read-only: é rascunho alheio, e efêmero.
       - /tmp/claude-0/-root-projetos:/workspace/pads:ro
-      # Iterar sem rebuild: o servidor não tem build step.
-      - ./server.js:/app/server.js:ro
+      # Iterar sem rebuild: o servidor não tem build step. Os três são montados como
+      # **diretório**, nunca arquivo a arquivo: módulo novo em `src/` passa a valer no
+      # container sem ninguém lembrar de somá-lo aqui — que era exatamente o jeito de
+      # subir com código velho enquanto os testes passavam no host.
+      - ./src:/app/src:ro
       # O parser: um arquivo, dois consumidores — o servidor importa daqui, o browser
       # o recebe por `/shared/doc.js`.
       - ./shared:/app/shared:ro
