@@ -2,6 +2,19 @@ import { createServer } from 'node:http'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join, resolve, relative, extname, sep } from 'node:path'
 
+// O parser do dialeto `.scratch/` vive num lugar só, e este é um dos dois que o usam —
+// o outro é o browser, que o importa de `/shared/doc.js` (servido logo abaixo).
+import {
+  COLUMNS,
+  KNOWN,
+  columnOf,
+  isClosed,
+  normalizeStatus,
+  parseBlockedBy,
+  parseDoc,
+  summarize,
+} from './shared/doc.js'
+
 const PORT = Number(process.env.PORT ?? 7777)
 const SCRATCH = resolve(process.env.SCRATCH_DIR ?? '/workspace/.scratch')
 const ARCHIVE = join(SCRATCH, 'archive')
@@ -9,6 +22,10 @@ const ARCHIVE = join(SCRATCH, 'archive')
 // rascunho que o agente deixou para trás, não estado do board.
 const PADS = resolve(process.env.PADS_DIR ?? '/workspace/pads')
 const PUBLIC = resolve(import.meta.dirname, 'public')
+// O parser que o browser também importa. É servido estático, sob o mesmo prefixo que o
+// `import` do `md.js` escreve (`../shared/doc.js`), para que o especificador resolva
+// igual nos dois lados: no filesystem, para o Node; na URL, para o browser.
+const SHARED = resolve(import.meta.dirname, 'shared')
 
 // Os mesmos arquivos têm dois nomes: o do container, que o board usa para ler e
 // escrever, e o do workspace, que é o único que faz sentido colar num agente.
@@ -27,128 +44,6 @@ const refOf = (path) => {
   const rest = relative(hit[0], path)
   return rest ? `${hit[1]}/${rest}` : hit[1]
 }
-
-export const OPEN = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'claimed', 'partial']
-export const CLOSED = ['resolved', 'done', 'wontfix']
-export const KNOWN = [...OPEN, ...CLOSED]
-
-// Colunas do board. Um status desconhecido cai em `triagem` e o card mostra o rótulo cru,
-// para que um vocabulário novo apareça em vez de sumir.
-export const COLUMNS = [
-  { id: 'triagem', label: 'Triagem', statuses: ['needs-triage', 'needs-info'] },
-  { id: 'pronto', label: 'Pronto', statuses: ['ready-for-agent', 'ready-for-human'] },
-  { id: 'curso', label: 'Em curso', statuses: ['claimed', 'partial'] },
-  { id: 'fechado', label: 'Fechado', statuses: ['resolved', 'done', 'wontfix'] },
-]
-
-export const columnOf = (status) =>
-  COLUMNS.find((c) => c.statuses.includes(status))?.id ?? 'triagem'
-
-// Chaves de cabeçalho reconhecidas. Restringir a esta lista impede que uma frase
-// em prosa com dois-pontos ("Nota: ...") seja lida como estado.
-export const HEADER_KEYS = ['status', 'type', 'repo', 'blocked by', 'parent', 'label', 'prd']
-
-export const HEADER_LINE = /^([A-Za-z][A-Za-z ]*?):\s*(.*)$/
-
-/** O preâmbulo vai do topo até a primeira seção `## `. Só ali existe estado. */
-export const preambleEnd = (lines) => {
-  const at = lines.findIndex((l) => l.startsWith('## '))
-  return at === -1 ? lines.length : at
-}
-
-/**
- * Lê o cabeçalho `Chave: valor` do preâmbulo.
- *
- * O workspace tem três dialetos: o wayfinder põe as chaves antes do `# Título`;
- * o issue tracker e o restore-tui põem depois. Varrer o preâmbulo inteiro cobre
- * os três sem precisar saber qual é qual.
- */
-export function parseDoc(raw) {
-  const lines = raw.split('\n')
-  const header = {}
-  for (const line of lines.slice(0, preambleEnd(lines))) {
-    const m = HEADER_LINE.exec(line)
-    if (!m) continue
-    const key = m[1].trim().toLowerCase()
-    if (HEADER_KEYS.includes(key)) header[key] = m[2].trim()
-  }
-  const title = lines.find((l) => l.startsWith('# '))?.slice(2).trim()
-  return { header, title }
-}
-
-/**
- * O primeiro parágrafo em prosa do documento — o que o esforço *é*, em uma frase.
- *
- * Um slug (`pos-2101-flapping-guard`) não conta história nenhuma, e abrir o PRD para
- * lembrar custa uma navegação. O parágrafo que o autor escreveu primeiro quase sempre
- * conta; é ele que o card mostra.
- *
- * **Começa depois do preâmbulo**, e essa é a decisão que faz o resumo prestar. O
- * preâmbulo é cabeçalho — e não só as chaves de `HEADER_KEYS`: os documentos trazem
- * `Data:`, `Labels:` e o que mais o autor inventar. Filtrar por lista de chaves
- * conhecidas deixaria "Data: 2026-07-12" virar o resumo de um PRD. A fronteira do
- * `## ` não depende de adivinhar chave nenhuma: acima dela é metadado, abaixo é texto.
- *
- * Documento sem seção alguma cai para o corpo inteiro — é tudo que ele tem.
- */
-export function summarize(raw) {
-  const lines = raw.split('\n')
-  const start = preambleEnd(lines)
-  const body = start === lines.length ? lines : lines.slice(start)
-
-  const para = []
-  let fenced = false
-
-  for (const line of body) {
-    const t = line.trim()
-    if (t.startsWith('```')) {
-      fenced = !fenced
-      continue
-    }
-    if (fenced) continue
-
-    // Bullet, tabela e citação ficam de fora: fora de contexto, informam menos que nada.
-    const prose =
-      t &&
-      !t.startsWith('#') &&
-      !t.startsWith('|') &&
-      !t.startsWith('>') &&
-      !t.startsWith('---') &&
-      !/^([-*+]|\d+\.)\s/.test(t)
-
-    if (prose) para.push(t)
-    else if (para.length) break // o primeiro parágrafo basta
-  }
-
-  const text = para.join(' ').replace(/[*`]/g, '')
-  return text.length > 320 ? `${text.slice(0, 317).trimEnd()}…` : text
-}
-
-export function normalizeStatus(value) {
-  const s = (value ?? '').trim().toLowerCase()
-  return KNOWN.includes(s) ? s : s ? `?${s}` : 'needs-triage'
-}
-
-export const isClosed = (status) => CLOSED.includes(status)
-
-/**
- * `Blocked by:` promete uma lista de números e entrega prosa: `01 (resolvido), 08 — a
- * revisão achou defeito no decayOffline; a bancada deve testar o binário corrigido`.
- *
- * Só o número que **abre** cada fragmento é referência — casar o fragmento inteiro
- * contra a lista de issues nunca acha ninguém, e o bloqueio some. O resto é a
- * justificativa, e é o que se lê antes de decidir furar a fila; por isso cada
- * dependência carrega os dois. Fragmento sem número que o abra (`(nada — pode começar
- * já)`) não referencia issue nenhuma e não vira dependência.
- */
-export const parseBlockedBy = (value) =>
-  (value ?? '')
-    .split(',')
-    .map((part) => {
-      const m = /^\s*(\d+)\s*(.*)$/.exec(part)
-      return m ? { number: m[1].padStart(2, '0'), note: m[2].trim(), raw: part.trim() } : null
-    })
-    .filter(Boolean)
 
 async function readIssue(effortSlug, dir, file) {
   const path = join(dir, file)
@@ -355,9 +250,13 @@ if (isMain) createServer(async (req, res) => {
       })
     }
 
-    const file = url.pathname === '/' ? 'index.html' : url.pathname.slice(1)
-    const path = resolve(PUBLIC, file)
-    if (!path.startsWith(PUBLIC + sep)) return send(res, 403, { error: 'proibido' })
+    // Estático de dois roots: `public/` na raiz da URL, e `shared/` sob `/shared/` — é
+    // por ali que o `md.js` do browser importa o parser que o servidor também usa.
+    const [root, file] = url.pathname.startsWith('/shared/')
+      ? [SHARED, url.pathname.slice('/shared/'.length)]
+      : [PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname.slice(1)]
+    const path = resolve(root, file)
+    if (!path.startsWith(root + sep)) return send(res, 403, { error: 'proibido' })
     return send(res, 200, await readFile(path, 'utf8'), MIME[extname(path)] ?? 'text/plain')
   } catch (err) {
     const missing = err.code === 'ENOENT'

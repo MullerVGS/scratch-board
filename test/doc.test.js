@@ -20,7 +20,7 @@ import {
   columnOf,
   isClosed,
   preambleEnd,
-} from '../server.js'
+} from '../shared/doc.js'
 
 describe('parseDoc — os três dialetos de cabeçalho', () => {
   test('wayfinder: chaves antes do `# Título`', () => {

@@ -13,4 +13,7 @@ services:
       - /tmp/claude-0/-root-projetos:/workspace/pads:ro
       # Iterar sem rebuild: o servidor não tem build step.
       - ./server.js:/app/server.js:ro
+      # O parser: um arquivo, dois consumidores — o servidor importa daqui, o browser
+      # o recebe por `/shared/doc.js`.
+      - ./shared:/app/shared:ro
       - ./public:/app/public:ro
