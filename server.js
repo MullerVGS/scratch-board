@@ -28,30 +28,30 @@ const refOf = (path) => {
   return rest ? `${hit[1]}/${rest}` : hit[1]
 }
 
-const OPEN = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'claimed', 'partial']
-const CLOSED = ['resolved', 'done', 'wontfix']
-const KNOWN = [...OPEN, ...CLOSED]
+export const OPEN = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'claimed', 'partial']
+export const CLOSED = ['resolved', 'done', 'wontfix']
+export const KNOWN = [...OPEN, ...CLOSED]
 
 // Colunas do board. Um status desconhecido cai em `triagem` e o card mostra o rótulo cru,
 // para que um vocabulário novo apareça em vez de sumir.
-const COLUMNS = [
+export const COLUMNS = [
   { id: 'triagem', label: 'Triagem', statuses: ['needs-triage', 'needs-info'] },
   { id: 'pronto', label: 'Pronto', statuses: ['ready-for-agent', 'ready-for-human'] },
   { id: 'curso', label: 'Em curso', statuses: ['claimed', 'partial'] },
   { id: 'fechado', label: 'Fechado', statuses: ['resolved', 'done', 'wontfix'] },
 ]
 
-const columnOf = (status) =>
+export const columnOf = (status) =>
   COLUMNS.find((c) => c.statuses.includes(status))?.id ?? 'triagem'
 
 // Chaves de cabeçalho reconhecidas. Restringir a esta lista impede que uma frase
 // em prosa com dois-pontos ("Nota: ...") seja lida como estado.
-const HEADER_KEYS = ['status', 'type', 'repo', 'blocked by', 'parent', 'label', 'prd']
+export const HEADER_KEYS = ['status', 'type', 'repo', 'blocked by', 'parent', 'label', 'prd']
 
-const HEADER_LINE = /^([A-Za-z][A-Za-z ]*?):\s*(.*)$/
+export const HEADER_LINE = /^([A-Za-z][A-Za-z ]*?):\s*(.*)$/
 
 /** O preâmbulo vai do topo até a primeira seção `## `. Só ali existe estado. */
-const preambleEnd = (lines) => {
+export const preambleEnd = (lines) => {
   const at = lines.findIndex((l) => l.startsWith('## '))
   return at === -1 ? lines.length : at
 }
@@ -63,7 +63,7 @@ const preambleEnd = (lines) => {
  * o issue tracker e o restore-tui põem depois. Varrer o preâmbulo inteiro cobre
  * os três sem precisar saber qual é qual.
  */
-function parseDoc(raw) {
+export function parseDoc(raw) {
   const lines = raw.split('\n')
   const header = {}
   for (const line of lines.slice(0, preambleEnd(lines))) {
@@ -91,7 +91,7 @@ function parseDoc(raw) {
  *
  * Documento sem seção alguma cai para o corpo inteiro — é tudo que ele tem.
  */
-function summarize(raw) {
+export function summarize(raw) {
   const lines = raw.split('\n')
   const start = preambleEnd(lines)
   const body = start === lines.length ? lines : lines.slice(start)
@@ -124,12 +124,12 @@ function summarize(raw) {
   return text.length > 320 ? `${text.slice(0, 317).trimEnd()}…` : text
 }
 
-function normalizeStatus(value) {
+export function normalizeStatus(value) {
   const s = (value ?? '').trim().toLowerCase()
   return KNOWN.includes(s) ? s : s ? `?${s}` : 'needs-triage'
 }
 
-const isClosed = (status) => CLOSED.includes(status)
+export const isClosed = (status) => CLOSED.includes(status)
 
 /**
  * `Blocked by:` promete uma lista de números e entrega prosa: `01 (resolvido), 08 — a
@@ -141,7 +141,7 @@ const isClosed = (status) => CLOSED.includes(status)
  * dependência carrega os dois. Fragmento sem número que o abra (`(nada — pode começar
  * já)`) não referencia issue nenhuma e não vira dependência.
  */
-const parseBlockedBy = (value) =>
+export const parseBlockedBy = (value) =>
   (value ?? '')
     .split(',')
     .map((part) => {
@@ -328,7 +328,12 @@ const send = (res, code, body, type = 'application/json') => {
   res.end(typeof body === 'string' ? body : JSON.stringify(body))
 }
 
-createServer(async (req, res) => {
+// O `listen` fica atrás do teste de módulo principal: `node server.js` sobe o servidor,
+// `import` (dos testes) só pega as funções puras. Sem isso, `node --test` levantaria a
+// porta 7777 e ficaria pendurado.
+const isMain = process.argv[1] && resolve(process.argv[1]) === import.meta.filename
+
+if (isMain) createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost')
   try {
     if (url.pathname === '/api/board') return send(res, 200, await buildBoard())
