@@ -37,6 +37,7 @@ import { join } from 'node:path'
 let mounts // o diretório comum: cada filho dele é uma origem
 let root // o `.scratch/` da origem `projetos`
 let pads
+let hist // o catálogo: temporário, para o teste não escrever no volume de produção
 let server
 let base
 
@@ -155,8 +156,12 @@ before(async () => {
   root = join(mounts, 'projetos')
   await mkdir(root, { recursive: true })
   pads = await mkdtemp(join(tmpdir(), 'board-pads-'))
+  hist = await mkdtemp(join(tmpdir(), 'board-hist-'))
   process.env.SCRATCHES_DIR = mounts
   process.env.PADS_DIR = pads
+  // O catálogo também sai do ambiente, e também é resolvido no import. Sem isto o
+  // servidor do teste escreveria no `HISTORY` de produção (`/workspace/history`).
+  process.env.HISTORY_DIR = hist
 
   await put('alpha/map.md', '# Mapa do alpha\n\nO primeiro parágrafo.\n')
   await put('alpha/issues/01-um.md', issue('01 — Um', 'resolved'))
@@ -172,6 +177,7 @@ after(async () => {
   await server?.close()
   await rm(mounts, { recursive: true, force: true })
   await rm(pads, { recursive: true, force: true })
+  await rm(hist, { recursive: true, force: true })
 })
 
 test('a origem de casa produz refs nus — é ela que o agente já tem debaixo dos pés', async () => {

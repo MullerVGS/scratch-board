@@ -27,6 +27,7 @@ import { join } from 'node:path'
 let mounts
 let root
 let pads
+let hist // o catálogo: temporário, para o teste não escrever no volume de produção
 let server
 let base
 
@@ -92,8 +93,12 @@ before(async () => {
   root = join(mounts, 'projetos')
   await mkdir(root, { recursive: true })
   pads = await mkdtemp(join(tmpdir(), 'board-drawer-pads-'))
+  hist = await mkdtemp(join(tmpdir(), 'board-drawer-hist-'))
   process.env.SCRATCHES_DIR = mounts
   process.env.PADS_DIR = pads
+  // O catálogo também sai do ambiente, e também é resolvido no import. Sem isto o
+  // servidor do teste escreveria no `HISTORY` de produção (`/workspace/history`).
+  process.env.HISTORY_DIR = hist
 
   await put('vivo/map.md', '# Mapa do vivo\n\nO primeiro parágrafo.\n')
   await put('vivo/issues/01-aberta.md', issue('01 — A que está aberta na gaveta', 'claimed'))
@@ -107,6 +112,7 @@ after(async () => {
   await server?.close()
   await rm(mounts, { recursive: true, force: true })
   await rm(pads, { recursive: true, force: true })
+  await rm(hist, { recursive: true, force: true })
 })
 
 const boardOf = async () => (await (await fetch(`${base}/api/board`)).json()).boards.projetos

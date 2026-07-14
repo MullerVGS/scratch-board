@@ -31,6 +31,7 @@ const SWEEP = 300 // a varredura de 90s, encurtada para caber num teste
 let mounts
 let root
 let pads
+let hist // o catálogo: temporário, para o teste não escrever no volume de produção
 let server
 let base
 
@@ -100,8 +101,12 @@ before(async () => {
   root = join(mounts, 'projetos')
   await mkdir(root, { recursive: true })
   pads = await mkdtemp(join(tmpdir(), 'board-sweep-pads-'))
+  hist = await mkdtemp(join(tmpdir(), 'board-sweep-hist-'))
   process.env.SCRATCHES_DIR = mounts
   process.env.PADS_DIR = pads
+  // O catálogo também sai do ambiente, e também é resolvido no import. Sem isto o
+  // servidor do teste escreveria no `HISTORY` de produção (`/workspace/history`).
+  process.env.HISTORY_DIR = hist
 
   await put('alpha/map.md', '# Mapa do alpha\n\nO primeiro parágrafo.\n')
   await put('alpha/issues/01-um.md', issue('01 — Um', 'ready-for-agent'))
@@ -122,6 +127,7 @@ after(async () => {
   await server?.close()
   await rm(mounts, { recursive: true, force: true })
   await rm(pads, { recursive: true, force: true })
+  await rm(hist, { recursive: true, force: true })
 })
 
 test('num board parado, a varredura roda e NÃO emite nada', async () => {

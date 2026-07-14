@@ -29,6 +29,7 @@ import { join } from 'node:path'
 
 let mounts // o diretório comum: cada filho dele é uma origem
 let pads
+let hist // o catálogo: temporário, para o teste não escrever no volume de produção
 let server
 let base
 
@@ -110,8 +111,12 @@ const effortOf = (b, slug) => b.efforts.find((e) => e.slug === slug)
 before(async () => {
   mounts = await mkdtemp(join(tmpdir(), 'board-ns-'))
   pads = await mkdtemp(join(tmpdir(), 'board-ns-pads-'))
+  hist = await mkdtemp(join(tmpdir(), 'board-ns-hist-'))
   process.env.SCRATCHES_DIR = mounts
   process.env.PADS_DIR = pads
+  // O catálogo também sai do ambiente, e também é resolvido no import. Sem isto o
+  // servidor do teste escreveria no `HISTORY` de produção (`/workspace/history`).
+  process.env.HISTORY_DIR = hist
 
   // A origem de casa, e um esforço nela.
   await put('projetos', 'comum/map.md', '# O esforço de casa\n\nO primeiro parágrafo.\n')
@@ -141,6 +146,7 @@ after(async () => {
   await server?.close()
   await rm(mounts, { recursive: true, force: true })
   await rm(pads, { recursive: true, force: true })
+  await rm(hist, { recursive: true, force: true })
 })
 
 test('cada subpasta do diretório comum é uma origem: casa primeiro, o resto em ordem alfabética', async () => {

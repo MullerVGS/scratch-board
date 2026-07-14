@@ -26,6 +26,7 @@ import { PADS, SCRATCHES, discover } from './paths.js'
 import { listPads } from './pads.js'
 import { createCache } from './cache.js'
 import { watchTree } from './watch.js'
+import { createHistory } from './history.js'
 
 const PORT = Number(process.env.PORT ?? 7777)
 const PUBLIC = resolve(import.meta.dirname, '..', 'public')
@@ -94,6 +95,12 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
   const wires = new Map(
     namespaces.map((ns) => [ns.name, { ns, cache: createCache(ns), unwatch: null }]),
   )
+
+  // O catálogo é **um**, e a origem vive na chave de cada linha. Ele não é por namespace
+  // como o cache: o cache existe para uma origem não suprimir a outra, e isso é uma
+  // propriedade do *push*. O catálogo só registra fatos, e fato de origem diferente não
+  // interfere em fato de origem nenhuma.
+  const history = await createHistory()
 
   // Os roots que o board pode ler. É o `safePath()` de sempre, agora generalizado às
   // origens descobertas — **e é só isso**: nenhuma política nova de `realpath`, nenhum
@@ -164,7 +171,22 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
    */
   async function sync(name) {
     const { cache } = wires.get(name)
-    const [{ json, changed: moved }, changed] = await Promise.all([cache.refresh(), cache.movedFiles()])
+    const [{ json, changed: moved, board }, changed] = await Promise.all([cache.refresh(), cache.movedFiles()])
+
+    // O catálogo observa **aqui**, e não no watcher: este é o único ponto do servidor por
+    // onde toda leitura de disco passa — o gatilho do watcher, a varredura de 90s e o
+    // `/api/board`. Pendurá-lo no watcher o deixaria cego justamente quando o watcher morre,
+    // que é o buraco que a varredura existe para tapar.
+    //
+    // Ele **não empurra nada**: um evento no catálogo não é um evento no fio. O board só sai
+    // daqui se o hash dele mudou, exatamente como antes.
+    //
+    // **Os arquivados entram junto**, e essa linha é a razão de o `buildBoard()` devolver as
+    // duas listas separadas: esforço arquivado é esforço **terminado** — exatamente aquele
+    // cuja duração o Gantt existe para mostrar. Observar só os ativos apagaria do catálogo a
+    // única história completa que existe.
+    await history.observe(name, [...board.efforts, ...board.archived], Date.now())
+
     if (moved) broadcast(frame(name, json, changed))
     else if (changed.length) broadcast(fileFrame(name, changed))
     return json
