@@ -39,3 +39,18 @@ services:
       # o recebe por `/shared/doc.js`.
       - ./shared:/app/shared:ro
       - ./public:/app/public:ro
+
+      # ---------- o catálogo ----------
+      #
+      # **O único lugar onde este servidor escreve, e ele é dele.** As origens acima continuam
+      # `:ro`: a garantia de que o board não corrompe os seus tickets é do **mount**, não da
+      # boa intenção — e ela tinha que sobreviver ao dia em que o servidor passou a ter estado.
+      # Sobreviveu: o estado mora aqui, e nenhum `.md` é tocado.
+      #
+      # Perder este volume **degrada, não zera**. O `birthtime`/`ctime` dos diretórios é relido
+      # do disco a cada subida, então as barras-pai do Gantt continuam de pé; o que se perde é
+      # só o que a observação sabia — e ela recomeça sozinha.
+      - scratch-board-history:/workspace/history
+
+volumes:
+  scratch-board-history:
