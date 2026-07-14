@@ -113,7 +113,11 @@ export async function createHistory(dir = HISTORY) {
   } catch { /* não há log ainda — é o primeiro boot da vida */ }
 
   try {
-    alive = JSON.parse(await readFile(beat, 'utf8')).at
+    // Normaliza o batimento de string ISO para ms. Data inválida resulta em `null` —
+    // o mesmo caminho seguro de "arquivo não existe". `lastSeen` é sempre `number | null`.
+    const parsed = JSON.parse(await readFile(beat, 'utf8')).at
+    const parsed_ms = new Date(parsed).getTime()
+    alive = Number.isFinite(parsed_ms) ? parsed_ms : null
   } catch { /* sem batimento: ninguém estava vigiando antes de mim */ }
 
   // Todo ticket que eu conhecia, eu o vi no batimento — foi o último instante em que estive
@@ -190,5 +194,13 @@ export async function createHistory(dir = HISTORY) {
     return entry ? { status: entry.status, since: entry.since } : null
   }
 
-  return { observe, of, get alive() { return alive } }
+  return {
+    observe,
+    of,
+    // Devolve a string ISO do último batimento, ou `null` se não houver.
+    // `lastSeen` é sempre `number | null` em memória; a conversão sai aqui.
+    get alive() {
+      return alive === null ? null : iso(alive)
+    },
+  }
 }

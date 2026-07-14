@@ -146,3 +146,32 @@ test('o ticket nunca visto tem limite inferior desconhecido, e o board não inve
   assert.equal(since.after, null) // não sei desde quando — e digo isso
   assert.equal(since.before, new Date(1000).toISOString())
 })
+
+test('arquivo `alive` com data inválida é descartado silenciosamente, não lança', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'hist-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  // Primeira instância escreve o batimento.
+  const first = await createHistory(dir)
+  await first.observe('projetos', [effort('eixo', ['01', 'ready-for-agent'])], 1000)
+
+  // Corrompe o arquivo `alive` para uma string inválida.
+  const beat = join(dir, 'alive')
+  await writeFile(beat, JSON.stringify({ at: 'lixo' }) + '\n')
+
+  // Segunda instância relê o arquivo corrompido. Deve descartar e resultar em `alive = null`.
+  const second = await createHistory(dir)
+  assert.equal(second.alive, null)
+
+  // Uma transição agora não deve lançar `RangeError`. Como `alive` é `null`,
+  // a janela `after` da transição deve ser `null` (não sabemos desde quando).
+  assert.doesNotThrow(() => {
+    second.observe('projetos', [effort('eixo', ['01', 'claimed'])], 5000)
+  })
+
+  // Verifica que a transição foi registrada com a janela correta.
+  const [, move] = await lines(dir)
+  assert.equal(move.kind, 'move')
+  assert.equal(move.after, null) // inválido descartado ⇒ sem limite inferior
+  assert.equal(move.before, new Date(5000).toISOString())
+})
