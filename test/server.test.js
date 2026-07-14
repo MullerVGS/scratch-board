@@ -531,6 +531,35 @@ test('as issues saem ordenadas por atividade dentro da coluna do kanban', async 
   )
 })
 
+test('tickets nascidos na mesma rajada saem em ordem numérica — rajada não é atividade', async () => {
+  // O `/to-tickets` escreve `01…07` de uma vez só. Com o `mtime` **cru**, o `07` é o mais
+  // recente e a coluna sai invertida — a frontier (`01`) no fim, que é o pior lugar para ela.
+  //
+  // E isso **não se conserta sozinho**: um ticket em `ready-for-agent` é, por definição, um
+  // que ninguém tocou desde que nasceu — tocá-lo muda o `Status:`, e mudar o status o **tira
+  // da coluna**. A inversão seria permanente, justamente na coluna de onde se escolhe trabalho.
+  //
+  // Daí a regra: **abaixo do dia, o carimbo de um ticket é ruído; o `NN` é informação** — ele
+  // é a espinha do `Blocked by:`. O dia manda, e dentro do dia manda o número.
+  // A rajada de verdade leva **segundos** entre um ticket e o outro (o agente compõe cada um),
+  // e é isso que dá ao `07` o carimbo mais novo. Escrever os cinco num loop cairia no mesmo
+  // milissegundo, empataria, e o teste passaria sem provar nada — daí o `utimes` escalonando.
+  const agora = Date.now()
+  for (const n of [1, 2, 3, 4, 5]) {
+    const file = `rajada-nn/issues/0${n}-t.md`
+    await put(file, issue(`0${n} — T`, 'ready-for-agent'))
+    const nasceu = new Date(agora - (6 - n) * 20_000) // 20s entre cada, e o 05 é o mais novo
+    await utimes(join(root, file), nasceu, nasceu)
+  }
+
+  const e = effortOf(await board(), 'rajada-nn')
+  assert.deepEqual(
+    e.issues.map((i) => i.file),
+    ['01-t.md', '02-t.md', '03-t.md', '04-t.md', '05-t.md'],
+    'a rajada de criação não carrega informação: quem manda dentro do dia é o número',
+  )
+})
+
 /**
  * O corpo de uma issue **não é projetado** — o board lê dela o `Status:`, o `Type:`, o título
  * e o `Blocked by:`, e nada mais. Então reescrever só o corpo deixa a projeção byte-a-byte

@@ -43,7 +43,7 @@ As decisões que caem daí, e o que cada uma protege:
 
 ```
 docker compose up -d      # http://localhost:7777 (só loopback)
-node --test test/         # 118 testes, zero dependências
+node --test test/         # 119 testes, zero dependências
 ```
 
 `src/`, `shared/` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta. **Mexer nas origens é a exceção**: elas são descobertas no `start()`, então um mount novo pede `docker compose up -d --force-recreate`, não um restart.
@@ -410,6 +410,22 @@ Quatro decisões, e cada uma protege alguma coisa:
 
 **Os arquivados também saem por atividade.** O `mv` do arquivamento preserva o `mtime` dos `.md`, então a lista sai pela atividade que cada esforço teve em vida — o último a ser encerrado no topo. Era alfabética; a mudança veio de graça e informa mais.
 
+### Esforço e ticket não ordenam pelo mesmo critério, e a assimetria é de domínio
+
+**Esforço: `mtime` cru. Ticket: o dia manda, e dentro do dia manda o número.**
+
+Parece inconsistência e não é. **O `/to-tickets` escreve `01…07` numa rajada só**, com segundos entre um e outro. Pelo `mtime` cru, o `07` fica sendo o mais recente e a coluna sai **invertida** — a frontier (`01`) no fim, que é o pior lugar possível para ela.
+
+E **isso não se conserta sozinho**, que é o que torna o defeito grave: um ticket em `ready-for-agent` é, por definição, um que **ninguém tocou** desde que nasceu — porque tocá-lo muda o `Status:`, e mudar o status o **tira da coluna**. A inversão seria permanente, e permanente justamente na coluna de onde se escolhe o trabalho.
+
+A regra cai sozinha do domínio: **abaixo do dia, o carimbo de um ticket é ruído — e o `NN` é informação.** O número é a espinha que o `Blocked by:` referencia. Quantizar o dia joga fora o ruído da rajada e devolve o sinal.
+
+O que se perde é pequeno e vale a pena dizer: **dentro do mesmo dia, o ticket mais quente não sobe na sua coluna.** Mas trabalhar num ticket **muda o status dele**, o que já o move de coluna — "qual estou trabalhando agora?" é respondido pela coluna `claimed`, não pela ordem dentro dela.
+
+**E o esforço fica no `mtime` cru justamente porque não tem `NN`.** Cortar o dia lá faria dois esforços tocados hoje empatarem, e a tela deixaria de responder *"qual esforço está quente agora?"* — a pergunta nº 1 do PRD, e o motivo de o eixo de tempo existir. Um esforço não tem número para desempatar; um ticket tem. É essa assimetria, e só ela, que justifica os dois critérios.
+
+O dia sai do `mtime` do **arquivo**, nunca de `Date.now()`: ele não envelhece com o relógio, e por isso a varredura de 90s não pode reordenar nada sozinha. (De quebra, a quantização **reduz** os pushes: dez salvamentos no mesmo dia não movem o ranking.)
+
 ### A limitação assumida: na visão geral, a ordem vale *dentro* da seção
 
 **E aqui a frase acima **não** se estende — cuidado, porque ela é convidativa.** A visão geral não desenha `board.efforts` de cima a baixo: o `overview.js` **particiona** os esforços em seções de ordem fixa — **Ativos → Prontos para arquivar → Parados → Arquivados** — e ordena por atividade **dentro de cada uma**.
@@ -422,7 +438,7 @@ Isto foi uma **escolha**, não um esquecimento. As duas saídas custavam mais do
 
 ## Os testes
 
-`node --test test/` — **118 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
+`node --test test/` — **119 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
 
 | Costura | O que trava |
 | --- | --- |

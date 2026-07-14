@@ -65,6 +65,43 @@ import { refIn } from './paths.js'
  */
 const byActivity = (a, b) => b.at - a.at
 
+const DAY = 86_400_000
+const dayOf = (at) => Math.floor(at / DAY)
+
+/** Um arquivo sem `NN` não pertence à espinha numerada e vai para o fim do seu dia. */
+const numberOf = (issue) =>
+  issue.number === '' ? Number.MAX_SAFE_INTEGER : Number(issue.number)
+
+/**
+ * As **issues** ordenam por outro critério, e a diferença é de domínio, não de gosto:
+ * **o dia manda, e dentro do dia manda o número.**
+ *
+ * O `/to-tickets` escreve `01…07` numa rajada só, com segundos entre um e outro. Pelo `mtime`
+ * cru, o `07` é o mais recente e a coluna sai **invertida** — a frontier (`01`) no fim, que é o
+ * pior lugar possível para ela. E não se conserta sozinho: um ticket em `ready-for-agent` é, por
+ * definição, um que **ninguém tocou** desde que nasceu (tocá-lo muda o `Status:`, e isso o tira
+ * da coluna). A inversão seria permanente, e permanente justamente na coluna de onde se escolhe
+ * o trabalho.
+ *
+ * Então: **abaixo do dia, o carimbo de um ticket é ruído — e o `NN` é informação.** Ele é a
+ * espinha que o `Blocked by:` referencia. Quantizar o dia joga o ruído fora e deixa o sinal.
+ *
+ * O que se perde é pouco e o que se ganha é muito: dentro do mesmo dia, o ticket "mais quente"
+ * não sobe na sua coluna. Mas trabalhar num ticket **muda o status dele**, o que já o move de
+ * coluna — a pergunta "qual estou trabalhando agora?" é respondida pela coluna `claimed`, não
+ * pela ordem dentro dela.
+ *
+ * **E os esforços continuam no `mtime` cru** (`byActivity`, acima): cortar o dia lá faria dois
+ * esforços tocados hoje empatarem, e a tela deixaria de responder *"qual esforço está quente
+ * agora?"* — a pergunta nº 1 do PRD. Um esforço não tem `NN` para desempatar; um ticket tem.
+ * É essa assimetria, e só ela, que justifica os dois critérios.
+ *
+ * (O dia sai do `mtime` do **arquivo**, nunca de `Date.now()` — ele não muda com o relógio, e
+ * por isso a varredura de 90s não pode reordenar nada sozinha.)
+ */
+const byDayThenNumber = (a, b) =>
+  dayOf(b.at) - dayOf(a.at) || numberOf(a.issue) - numberOf(b.issue)
+
 /**
  * Um documento e **quando ele foi tocado**, numa ida só ao disco. É a única forma de ler
  * aqui: quem lê um `.md` para projetá-lo também precisa do carimbo que o ordena, e as duas
@@ -111,14 +148,12 @@ export async function readEffort(ns, root, slug) {
     files = (await readdir(issuesDir)).filter((f) => extname(f) === '.md').sort()
   } catch { /* esforço sem issues/ — só PRD, é válido */ }
 
-  // As issues saem **por atividade**, e a ordem do array *é* a ordem da tela: o kanban
-  // (`public/effort.js`) filtra por coluna, e `filter` preserva a ordem — então ordenar a
-  // lista uma vez, aqui, ordena **dentro de cada coluna**, que é onde o olho procura.
-  //
-  // A ordem numérica que se perde não some do board: o número continua em destaque no card,
-  // e a leitura estrutural — as arestas do `Blocked by:` — vive no grafo.
+  // As issues saem pelo **dia de atividade e, dentro do dia, pelo número** — ver
+  // `byDayThenNumber`. A ordem do array *é* a ordem da tela: o kanban (`public/effort.js`)
+  // filtra por coluna, e `filter` preserva a ordem — então ordenar a lista uma vez, aqui,
+  // ordena **dentro de cada coluna**, que é onde o olho procura.
   const stamped = (await Promise.all(files.map((f) => readIssue(ns, slug, issuesDir, f))))
-    .sort(byActivity)
+    .sort(byDayThenNumber)
   const issues = stamped.map((s) => s.issue)
 
   // Um item está bloqueado se qualquer issue que ele lista ainda não fechou. Uma
