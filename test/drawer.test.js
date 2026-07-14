@@ -24,6 +24,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+let mounts
 let root
 let pads
 let server
@@ -87,9 +88,11 @@ async function openStream() {
 const issue = (title, status) => `Status: ${status}\nType: task\n\n# ${title}\n\nUm corpo qualquer.\n`
 
 before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'board-drawer-'))
+  mounts = await mkdtemp(join(tmpdir(), 'board-drawer-'))
+  root = join(mounts, 'projetos')
+  await mkdir(root, { recursive: true })
   pads = await mkdtemp(join(tmpdir(), 'board-drawer-pads-'))
-  process.env.SCRATCH_DIR = root
+  process.env.SCRATCHES_DIR = mounts
   process.env.PADS_DIR = pads
 
   await put('vivo/map.md', '# Mapa do vivo\n\nO primeiro parágrafo.\n')
@@ -102,11 +105,11 @@ before(async () => {
 
 after(async () => {
   await server?.close()
-  await rm(root, { recursive: true, force: true })
+  await rm(mounts, { recursive: true, force: true })
   await rm(pads, { recursive: true, force: true })
 })
 
-const boardOf = async () => (await (await fetch(`${base}/api/board`)).json())
+const boardOf = async () => (await (await fetch(`${base}/api/board`)).json()).boards.projetos
 const openIssue = async () =>
   (await boardOf()).efforts.find((e) => e.slug === 'vivo').issues.find((i) => i.number === '01')
 
@@ -154,6 +157,21 @@ test('remover o arquivo aberto chega à gaveta: o push traz o caminho dele no `c
   } finally {
     stream.close()
   }
+})
+
+test('o esforço diz de que origem veio e onde mora — os dois campos com que a gaveta se acha', async () => {
+  // Com uma origem só, a gaveta podia perguntar "o board"; com N, ela tem que perguntar
+  // **qual**. O `freshOpts()` recalcula a moldura contra `state.boards[effort.ns]`, e o
+  // `wireRefs()` resolve um link relativo contra `effort.path`. Os dois vêm do servidor, e
+  // se qualquer um sumir do payload a gaveta procura o esforço no board errado — que, com
+  // slugs repetidos entre origens, é o jeito de **achar** o esforço errado.
+  const vivo = (await boardOf()).efforts.find((e) => e.slug === 'vivo')
+
+  assert.equal(vivo.ns, 'projetos')
+  assert.equal(vivo.path, join(root, 'vivo'))
+  // E o `path` do esforço é o prefixo do `path` das issues dele: é essa igualdade que faz o
+  // `${effort.path}/${doc.name}` do `effort.js` cair no arquivo certo.
+  assert.ok(vivo.issues[0].path.startsWith(`${vivo.path}/`))
 })
 
 test('o /api/file de um arquivo removido responde a mensagem que a gaveta procura para dizer "sumiu"', async () => {

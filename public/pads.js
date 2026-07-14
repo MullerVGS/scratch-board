@@ -1,10 +1,16 @@
 /**
- * Os scratchpads de sessão — o segundo root, montado read-only.
+ * Os scratchpads de sessão — o root que **não é uma origem**, montado read-only.
  *
  * É rascunho de agente: o board lê e não toca. Vive em `/tmp`, some no reboot do WSL,
  * e o board não promete o contrário.
+ *
+ * Eles são **globais**: ficam fora das abas de origem, porque não pertencem a repositório
+ * nenhum — são o rascunho do Claude, não o tracker de um projeto. E continuam **sob
+ * demanda**: sem watcher e sem push, relidos ao entrar aqui e pelo botão de reler. Vigiar o
+ * churn de `/tmp` seria ruído puro.
  */
 import { api, el, esc, copyBtn } from './dom.js'
+import { state } from './state.js'
 import { view, crumbs, tally } from './shell.js'
 import { openDrawer } from './drawer.js'
 
@@ -50,7 +56,9 @@ function padCard(pad) {
 
 export async function renderPads() {
   const back = el('<button>← esforços</button>')
-  back.onclick = () => (location.hash = '')
+  // Os pads não têm origem, então "voltar" é a origem de casa — a primeira aba, a mesma que
+  // o board abre. Voltar para `#/` só reabriria esta decisão no roteador.
+  back.onclick = () => (location.hash = `#/${state.namespaces[0] ?? ''}`)
   crumbs.replaceChildren(back, el('<span>/ scratchpads</span>'))
 
   // O fetch vem **antes** de tocar na tela. A ordem antiga esvaziava a `view` e só então

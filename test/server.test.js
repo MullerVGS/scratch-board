@@ -20,8 +20,13 @@
  * e um import de módulo falha **em silêncio**: o board simplesmente não monta. A rota só é
  * defensável por HTTP, e é por isso que ela é testada aqui.
  *
- * Os roots do board saem do ambiente (`SCRATCH_DIR`, `PADS_DIR`) e o `paths.js` os resolve
+ * Os roots do board saem do ambiente (`SCRATCHES_DIR`, `PADS_DIR`) e o `paths.js` os resolve
  * no import — daí o `import()` dinâmico depois de plantar o ambiente.
+ *
+ * Aqui há **uma** origem, `projetos`, e é de propósito: o que se afirma neste arquivo é o
+ * push, e ele não deve depender de quantas origens existem. As garantias que só aparecem com
+ * mais de uma — isolamento, slugs colidentes, supressão que não atravessa — moram no
+ * `namespaces.test.js`.
  */
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -29,7 +34,8 @@ import { mkdtemp, mkdir, writeFile, rename, rm, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-let root // o `.scratch/` temporário
+let mounts // o diretório comum: cada filho dele é uma origem
+let root // o `.scratch/` da origem `projetos`
 let pads
 let server
 let base
@@ -122,13 +128,16 @@ async function openStream() {
 }
 
 const get = (path) => fetch(`${base}${path}`)
-const board = async () => (await get('/api/board')).json()
+/** O `/api/board` serve **todas** as origens; aqui só existe uma, e é dela que se fala. */
+const board = async () => (await (await get('/api/board')).json()).boards.projetos
 const effortOf = (b, slug) => b.efforts.find((e) => e.slug === slug)
 
 before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'board-scratch-'))
+  mounts = await mkdtemp(join(tmpdir(), 'board-mounts-'))
+  root = join(mounts, 'projetos')
+  await mkdir(root, { recursive: true })
   pads = await mkdtemp(join(tmpdir(), 'board-pads-'))
-  process.env.SCRATCH_DIR = root
+  process.env.SCRATCHES_DIR = mounts
   process.env.PADS_DIR = pads
 
   await put('alpha/map.md', '# Mapa do alpha\n\nO primeiro parágrafo.\n')
@@ -143,8 +152,18 @@ before(async () => {
 
 after(async () => {
   await server?.close()
-  await rm(root, { recursive: true, force: true })
+  await rm(mounts, { recursive: true, force: true })
   await rm(pads, { recursive: true, force: true })
+})
+
+test('a origem de casa produz refs nus — é ela que o agente já tem debaixo dos pés', async () => {
+  // O `ref` é o que se cola num prompt, e os comandos partem de `/root/projetos`. Um
+  // `projetos/.scratch/...` seria um caminho que não existe a partir de lá.
+  const alpha = effortOf(await board(), 'alpha')
+  assert.equal(alpha.ref, '.scratch/alpha')
+  assert.equal(alpha.issues[0].ref, '.scratch/alpha/issues/01-um.md')
+  // E o caminho do container nunca vaza para o vocabulário do humano.
+  assert.equal(alpha.ref.includes(mounts), false)
 })
 
 test('/api/board projeta o disco', async () => {

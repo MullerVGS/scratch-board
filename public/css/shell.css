@@ -236,3 +236,82 @@ main {
   padding: 10px 4px;
   text-align: center;
 }
+
+/* Origem que não deu para ler. Vermelho porque **não é um estado vazio**: um `.scratch/`
+   sem esforço é uma coisa (e a `.empty` de sempre a diz), e um `.scratch/` que o disco
+   recusou é outra. O board tem que saber dizer as duas com palavras diferentes. */
+.empty.bad {
+  color: var(--red);
+}
+
+.empty.bad strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* ---------- as abas de origem ---------- */
+
+/* A faixa de origens. Ela **só existe com mais de uma** (`renderTabs`), então o board de um
+   workspace só continua exatamente como era: nada a escolher, nada na tela.
+
+   Não abre media query: os tokens já dão o alvo de toque (`--tap`) e a regra genérica de
+   `nav` do topo já desce a faixa para uma linha própria no estreito. Aqui é só forma. */
+.nstabs {
+  gap: 4px;
+}
+
+.nstab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  min-height: var(--tap);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+/* A regra genérica `nav span` deixa o texto monoespaçado e apagado — ela foi escrita para a
+   trilha, que é caminho. O nome de uma origem é nome, não caminho. */
+.nstab span {
+  font-family: inherit;
+  color: inherit;
+}
+
+.nstab:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.nstab.on {
+  background: var(--panel-3);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+/* A contagem de issues abertas da origem — **inclusive quando ela não está na tela**. É a
+   única coisa que diz que a outra origem andou; sem ela, uma origem inativa que recebeu um
+   push seria indistinguível de uma parada, e o board voltaria a ficar mudo sobre o que não
+   está debaixo do olho. */
+.nstab b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.nstab.on b {
+  color: var(--accent);
+}
+
+/* A origem não deu para ler. O número seria uma mentira — zero issues abertas é uma
+   afirmação sobre o disco, e o disco não respondeu. */
+.nstab b.bad {
+  color: var(--red);
+}

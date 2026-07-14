@@ -11,7 +11,7 @@
  * você a abriu: para ver o que mudou, fechava e reabria.
  */
 import { api, el, esc, copy, copyBtn } from './dom.js'
-import { state } from './state.js'
+import { boardOf } from './state.js'
 import { issuePrompts, promptStrip } from './prompts.js'
 import { cleanTitle } from './issues.js'
 import { renderMarkdown } from './md.js'
@@ -81,7 +81,9 @@ function wireRefs(body, path, effort, archived) {
     }
 
     const name = target.slice(target.lastIndexOf('/') + 1)
-    const base = effort ? `${state.board.root}/${archived ? 'archive/' : ''}${effort.slug}` : null
+    // O diretório do esforço, dito pelo servidor — que sabe de que origem ele é. O cliente
+    // não remonta root + archive + slug na mão: com N origens, essa conta é do servidor.
+    const base = effort?.path ?? null
     b.onclick = () =>
       openDrawer(
         target,
@@ -158,13 +160,19 @@ function paintFrame({ eyebrow, title, ref, prompts = [] }) {
  *
  * Documento solto (um `map.md`, um `.txt` seguido por link) não tem issue de onde tirar
  * `eyebrow` e comando: só o `effort` é renovado, para o `wireRefs()` resolver contra o
- * board de agora.
+ * board de agora. Um scratchpad não tem esforço nenhum, e sai por aqui intacto.
+ *
+ * O board a consultar é o **da origem do esforço aberto**, que nem sempre é a que está na
+ * tela: dá para abrir a gaveta numa origem e trocar de aba. O esforço carrega o seu `ns`, e
+ * é por isso que ele carrega — sem isso, a gaveta procuraria o esforço no board errado e,
+ * com um slug repetido entre origens, o **acharia**.
  */
 function freshOpts(path, opts) {
   const slug = opts.effort?.slug
   if (!slug) return opts
 
-  const pool = opts.archived ? state.board.archived : state.board.efforts
+  const board = boardOf(opts.effort.ns)
+  const pool = opts.archived ? board?.archived : board?.efforts
   const effort = pool?.find((e) => e.slug === slug)
   if (!effort) return opts // o esforço sumiu do board; o que temos é o que temos
 

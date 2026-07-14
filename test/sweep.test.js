@@ -14,9 +14,11 @@
  * roda de novo, e **não emite byte nenhum**. Reconstruir não é empurrar; quem decide é o
  * hash. Sem isso ela seria o polling de volta, só que mais lento.
  *
- * Arquivo separado do `server.test.js` de propósito: o `cache.js` guarda o board num
- * módulo, e o `node --test` dá um processo por arquivo — dois servidores no mesmo processo
- * dividiriam o mesmo hash e um contaminaria o outro.
+ * Arquivo separado do `server.test.js` porque a varredura precisa de um relógio curto
+ * (`sweep: 300`), e um servidor que empurra sozinho a cada 300ms envenenaria as asserções de
+ * silêncio do outro arquivo. (Já foi separado por outro motivo — o `cache.js` guardava o hash
+ * num módulo, e dois servidores no mesmo processo o dividiriam. Isso acabou: o cache agora é
+ * uma fábrica por origem, e o estado nasce dentro do `start()`.)
  */
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -26,6 +28,7 @@ import { join } from 'node:path'
 
 const SWEEP = 300 // a varredura de 90s, encurtada para caber num teste
 
+let mounts
 let root
 let pads
 let server
@@ -93,9 +96,11 @@ async function openStream() {
 const effortOf = (b, slug) => b.efforts.find((e) => e.slug === slug)
 
 before(async () => {
-  root = await mkdtemp(join(tmpdir(), 'board-sweep-'))
+  mounts = await mkdtemp(join(tmpdir(), 'board-sweep-'))
+  root = join(mounts, 'projetos')
+  await mkdir(root, { recursive: true })
   pads = await mkdtemp(join(tmpdir(), 'board-sweep-pads-'))
-  process.env.SCRATCH_DIR = root
+  process.env.SCRATCHES_DIR = mounts
   process.env.PADS_DIR = pads
 
   await put('alpha/map.md', '# Mapa do alpha\n\nO primeiro parágrafo.\n')
@@ -108,7 +113,7 @@ before(async () => {
 
 after(async () => {
   await server?.close()
-  await rm(root, { recursive: true, force: true })
+  await rm(mounts, { recursive: true, force: true })
   await rm(pads, { recursive: true, force: true })
 })
 
@@ -170,8 +175,8 @@ test('o /api/board relê o disco de verdade — o botão de refresh não é uma 
     server.stopWatch()
     await put('beta/PRD.md', '# Esforço beta\n\nNasceu agora.\n')
 
-    const b = await (await fetch(`${base}/api/board`)).json()
-    assert.ok(effortOf(b, 'beta'), 'o /api/board serviu cache: o esforço novo não apareceu')
+    const { boards } = await (await fetch(`${base}/api/board`)).json()
+    assert.ok(effortOf(boards.projetos, 'beta'), 'o /api/board serviu cache: o esforço novo não apareceu')
 
     // E mais: a releitura que descobriu a novidade avisa **as outras abas**. Quem aperta
     // refresh numa aba não guarda a descoberta para si.

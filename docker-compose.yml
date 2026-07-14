@@ -8,11 +8,28 @@ services:
       # bridge (172.17.0.1), onde um bind em 127.0.0.1 não escuta.
       - "0.0.0.0:7777:7777"
     volumes:
-      # Fonte da verdade. Read-only: o board é uma projeção — quem escreve nos .md
-      # são você e as skills. O mount é a garantia, não só a intenção.
-      - ../.scratch:/workspace/.scratch:ro
-      # Scratchpads de sessão dos agentes. Read-only: é rascunho alheio, e efêmero.
+      # ---------- as origens ----------
+      #
+      # **Este bloco é a configuração inteira.** Cada mount sob `/workspace/scratches/` é
+      # uma origem completa (esforços, mapas, issues, archive, grafo, gaveta, push), e o
+      # **nome da pasta é o nome do namespace** — não há lista em env, nem arquivo de
+      # config, nem nada a manter em dois lugares. Somar um repositório é somar uma linha
+      # aqui e recriar o container; ele aparece como aba nova.
+      #
+      # O nome também decide o `ref` que o humano copia: os comandos partem de
+      # `/root/projetos`, então `projetos` produz `.scratch/...` e qualquer outra origem
+      # produz `<nome>/.scratch/...`. Nomeie a pasta como o caminho do repo a partir daí.
+      #
+      # Read-only, todas: o board é uma projeção — quem escreve nos .md são você e as
+      # skills. O mount é a garantia, não só a intenção.
+      - ../.scratch:/workspace/scratches/projetos:ro
+      - ../pos/.scratch:/workspace/scratches/pos:ro
+      - ../vend-server/.scratch:/workspace/scratches/vend-server:ro
+
+      # Scratchpads de sessão dos agentes. **Não é uma origem**: é rascunho efêmero do
+      # Claude, global, sem watcher e sem push. Read-only, como tudo aqui.
       - /tmp/claude-0/-root-projetos:/workspace/pads:ro
+
       # Iterar sem rebuild: o servidor não tem build step. Os três são montados como
       # **diretório**, nunca arquivo a arquivo: módulo novo em `src/` passa a valer no
       # container sem ninguém lembrar de somá-lo aqui — que era exatamente o jeito de

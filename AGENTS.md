@@ -1,6 +1,6 @@
 # AGENTS.md — scratch-board
 
-Board de leitura do `.scratch/` do workspace. Serve para enxergar os esforços em curso, lembrar do que cada um se trata, ler os documentos e sair com o comando que destrava o próximo passo.
+Board de leitura dos `.scratch/` do workspace. Serve para enxergar os esforços em curso, lembrar do que cada um se trata, ler os documentos e sair com o comando que destrava o próximo passo.
 
 ## O princípio
 
@@ -14,14 +14,39 @@ Houve um kanban com drag-and-drop que gravava `Status:` ao soltar o card. Saiu. 
 
 Se for adicionar recurso, mantenha a propriedade: **nada de estado que não esteja nos `.md`, e nada de escrita.** A única exceção é a largura da gaveta (ver **A gaveta**), que é preferência de quem olha, não conteúdo.
 
+## As origens
+
+O board não tem *um* `.scratch/`. Ele tem **os que estiverem montados**, cada um uma **origem** (namespace) completa: esforços, mapas, issues, archive, kanban, grafo, gaveta, comandos e push. `projetos` é a de casa; `vend-server` é a segunda; qualquer subpasta nova é a próxima.
+
+**O compose é a configuração, e é a única.** Cada filho direto de `/workspace/scratches/` é uma origem, e **o nome da pasta é o nome dela**:
+
+```yaml
+- ../.scratch:/workspace/scratches/projetos:ro
+- ../vend-server/.scratch:/workspace/scratches/vend-server:ro
+```
+
+Não há lista em env, não há arquivo de config, não há registro no código. Uma segunda lista seria uma segunda fonte da verdade, e as duas divergiriam no dia em que alguém somasse o mount e esquecesse a lista — o board subiria mostrando um repositório a menos, **sem erro nenhum**. A descoberta é um `readdir` no `start()`: mount novo, aba nova, container recriado.
+
+As decisões que caem daí, e o que cada uma protege:
+
+- **A de casa vem primeira; o resto, em ordem alfabética.** `HOME_NS` (default `projetos`) é quem decide qual é a de casa, e ela é a entrada inicial: um `#/` nu vai para ela.
+- **O nome da origem decide o `ref`.** Os comandos partem de `/root/projetos`, então a de casa produz `.scratch/...` — nu, porque o agente já está lá — e qualquer outra produz `<nome>/.scratch/...`. **Nomeie a pasta do mount como o caminho do repo a partir de `/root/projetos`**, ou o comando copiado apontará para um lugar que não existe. O caminho do container nunca aparece na tela.
+- **O nome é um segmento só, e um repo aninhado ainda não tem como entrar.** `admin-server/administrative` está a dois níveis de `/root/projetos`, e um mount em `/workspace/scratches/admin-server/administrative` **não** cria uma origem chamada `admin-server/administrative`: ele cria um filho direto chamado `admin-server`, e o board o lê como uma origem cujo único "esforço" se chama `administrative`. Não estoura nada — **desenha um board plausível e errado**, que é o pior jeito de falhar. Enquanto isso não for resolvido (o `ref` teria que sair de outro lugar que não o nome da pasta), **monte só repos de primeiro nível**.
+- **Toda rota é qualificada, e não há rota legada.** `#/<ns>`, `#/<ns>/<slug>`, `#/<ns>/<slug>/grafo`, `#/<ns>/archive/<slug>`. O slug sozinho não endereça nada: **dois esforços com o mesmo slug em origens diferentes existem**, e um hash sem origem escolheria um dos dois no escuro. Um `#/<slug>` velho cai na origem de casa em vez de meio funcionar.
+- **Watcher, hash do board, digest dos arquivos e varredura são por origem.** O `cache.js` é uma **fábrica** (`createCache(ns)`) por isso: com o estado no módulo, duas origens dividiriam o mesmo hash, e a segunda a escrever teria a sua mudança **suprimida** pela primeira — o board de um repositório simplesmente parando de chegar, que é indistinguível de "nada mudou". Não há supressão cruzada, e não é uma regra a lembrar: é a forma da função.
+- **Uma conexão SSE, N origens.** Cada evento carrega `ns` e **só o board daquela origem** — mandar as N em todo evento seria pagar o board do `vend-server` toda vez que alguém escreve no `projetos`. O cliente guarda o board novo sempre; **redesenha só se a origem for a que está na tela**. Uma origem inativa que andou atualiza a contagem da própria aba e nada mais se mexe (medido: **0 re-render** da origem ativa, e a aba do `projetos` subindo de 58 para 59 enquanto o `vend-server` estava aberto). Trocar de aba não faz request: o board já está na mão.
+- **O snapshot de conexão manda todas as origens, uma por frame.** Quem reconecta não sabe quanto tempo ficou fora, e a origem que não está na tela também pode ter andado.
+- **Vazia e quebrada são estados diferentes, e o board diz qual é qual.** Um `.scratch/` recém-montado sem esforço nenhum mostra o estado vazio; uma origem que o disco recusou mostra **o erro, em vermelho**, e a aba dela troca a contagem por um `!`. Servir uma lista vazia no lugar do erro seria a mentira mais cara que este board pode contar: um repositório cheio de esforços aparecendo como um repositório sem nenhum. A falha fica **contida** na origem que a sofreu (`errorBoard()`, em `board.js`) — sem isso, um `readFile` que estoura num repo derruba a montagem de todos.
+- **O `safePath()` apenas conhece mais roots.** Nenhuma política nova de `realpath`, nenhum endurecimento novo de symlink: o que mudou foi a lista, não o modelo. O diretório comum **não** é um root — ele contém as origens, mas não é uma delas.
+
 ## Rodar
 
 ```
 docker compose up -d      # http://localhost:7777 (só loopback)
-node --test test/         # 94 testes, zero dependências
+node --test test/         # 114 testes, zero dependências
 ```
 
-`src/`, `shared/` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta.
+`src/`, `shared/` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta. **Mexer nas origens é a exceção**: elas são descobertas no `start()`, então um mount novo pede `docker compose up -d --force-recreate`, não um restart.
 
 ## Stack
 
@@ -70,8 +95,10 @@ Por isso o fio tem dois eventos, e o `sync()` tem duas supressões que **não po
 
 | evento | quando | o que carrega | quem decide |
 | --- | --- | --- | --- |
-| `message` | o **board** mudou | o board inteiro (+ `changed`) | o hash do board (`refresh()`) — autoriza **redesenhar a tela** |
-| `files` | o **disco** mudou e o board não | **só os caminhos** (~126 bytes) | o digest do conteúdo (`movedFiles()`) — autoriza **avisar quem lê** |
+| `message` | o **board** mudou | `ns` + o board daquela origem (+ `changed`) | o hash do board (`refresh()`) — autoriza **redesenhar a tela** |
+| `files` | o **disco** mudou e o board não | `ns` + **só os caminhos** (~126 bytes) | o digest do conteúdo (`movedFiles()`) — autoriza **avisar quem lê** |
+
+Os dois carregam `ns`, e **nenhum evento pode ser anônimo**: sem ele o cliente guardaria o board no lugar errado, e a tela mostraria os esforços de um repositório sob o nome de outro. O `changed`, porém, não precisa dele — o caminho é absoluto e já diz de que origem é, e a gaveta o compara direto com o que tem aberto (que pode ser de uma origem que não está na tela).
 
 Colapsar as duas *era* o bug: enquanto o único sinal era o hash do board, a gaveta viva só funcionava nas bordas (quando o agente reivindicava e quando ele resolvia), e ficava cega enquanto ele escrevia o corpo. Medido: 126 bytes contra 71.917 do board — **571× menor**.
 
@@ -113,7 +140,7 @@ Ninguém que escreve no `.scratch/` escreve assim, então o buraco é estreito e
 
 Três defesas, e as três estão no código:
 
-- **Varredura de 90s** (`SWEEP_MS`, `src/server.js`) — um `setInterval` que chama o `sync()`, que já relê, já compara e já suprime. Ela é quase de graça **por causa da supressão**: ~40 reconstruções/hora a ~16ms, e na esmagadora maioria das voltas **zero byte no fio e zero re-render** — contra 720 reconstruções *com* 720 re-renders e ~44 MB/hora do polling. É 18× menos trabalho, e devolve ao board a única propriedade que o polling tinha de graça: **ele não consegue ficar em silêncio mentiroso por mais de 90 segundos.**
+- **Varredura de 90s** (`SWEEP_MS`, `src/server.js`) — um `setInterval` que chama o `sync()` **de cada origem**, e cada uma relê, compara e suprime por si: um watcher morto no `vend-server` não é motivo para reempurrar o `projetos`. Ela é quase de graça **por causa da supressão**: ~40 reconstruções/hora por origem a ~16ms, e na esmagadora maioria das voltas **zero byte no fio e zero re-render** — contra 720 reconstruções *com* 720 re-renders e ~44 MB/hora do polling. É 18× menos trabalho, e devolve ao board a única propriedade que o polling tinha de graça: **ele não consegue ficar em silêncio mentiroso por mais de 90 segundos.**
 - **Indicador de conexão** (`public/shell.js`, `css/shell.css`) — o `.dot` que já existia no `<h1>`, com o estado em `data-conn` e as cores que já eram token. Ele não é enfeite: é a **única coisa na tela capaz de dizer *não sei***.
 
   | estado | cor | o que diz |
@@ -135,16 +162,18 @@ O lado servidor vive em `src/`, um assunto por arquivo:
 
 | Módulo | Assunto |
 | --- | --- |
-| `src/board.js` | Monta a projeção do `.scratch/` — esforços, issues, arestas de bloqueio. `buildBoard()` é "leia o disco agora": **sem cache dentro**. |
-| `src/pads.js` | Os scratchpads de sessão. |
-| `src/paths.js` | Os roots (`SCRATCH`, `ARCHIVE`, `PADS`) e a tradução `path`/`ref` (`refOf`). |
-| `src/watch.js` | O disco falando: `fs.watch` recursivo, debounce, reopen no `error`. **Só emite.** |
-| `src/cache.js` | A supressão: o hash do board (`refresh()`) e o digest por arquivo (`movedFiles()`, `seed()`). |
-| `src/server.js` | Só HTTP: rotas, estáticos, SSE, `safePath()`, `sync()` e a varredura. |
+| `src/board.js` | Monta a projeção de **uma origem** — esforços, issues, arestas de bloqueio. `buildBoard(ns)` é "leia o disco agora": **sem cache dentro**. E o `errorBoard()`, para a origem que não deu para ler. |
+| `src/pads.js` | Os scratchpads de sessão — o root que **não é uma origem**. |
+| `src/paths.js` | O `discover()` das origens e a tradução `path`/`ref` (`refIn`, `padRef`). |
+| `src/watch.js` | O disco falando: `fs.watch` recursivo, debounce, reopen no `error`. **Só emite.** Um por origem. |
+| `src/cache.js` | A supressão, **por origem**: `createCache(ns)` fecha o hash do board (`refresh()`) e o digest por arquivo (`movedFiles()`, `seed()`) dentro do namespace. |
+| `src/server.js` | Só HTTP: rotas, estáticos, SSE, `safePath()`, `sync(ns)` e a varredura. |
 
 O parser **não mora aqui**: ele é `shared/doc.js`, porque o browser também o importa.
 
-`paths.js` existe por uma razão mecânica: se `refOf()` morasse no `server.js`, `board.js` e `pads.js` o importariam de volta — ciclo.
+`paths.js` existe por uma razão mecânica: se a tradução `path`/`ref` morasse no `server.js`, `board.js` e `pads.js` o importariam de volta — ciclo.
+
+**Nada tem estado de módulo.** Os assinantes do SSE, os caches e os watchers nascem dentro do `start()` — dois servidores no mesmo processo não se enxergam. Era assim que o hash do `cache.js` vazava entre servidores, e é o tipo de acoplamento que só aparece num teste que ninguém escreveu ainda.
 
 Os três diretórios (`src/`, `shared/`, `public/`) são montados **como diretório**, nunca arquivo a arquivo. O compose já montou `./server.js:/app/server.js`, e o preço apareceu no primeiro módulo novo: os testes passavam no host enquanto o container subia com código velho — ou estourava no import — porque ninguém lembrou de somar o arquivo ao `docker-compose.yml` e ao `Dockerfile`. Módulo novo em `src/` passa a valer sem tocar em nenhum dos dois.
 
@@ -157,8 +186,8 @@ O `shared/` **não** entrou em `src/`, e é deliberado: `src/` é o que só o se
 | Módulo | Assunto |
 | --- | --- |
 | `dom.js` | `el()`, **`svg()`**, `esc()`, `api()`, `toast()`, `copy()`, `copyBtn()` |
-| `shell.js` | A moldura: `view`, `crumbs`, `tally`, o indicador de conexão e o botão de reler |
-| `state.js` | O board na mão do cliente — um **contêiner mutável**, não um `let` exportado (um binding exportado é cópia viva só para quem já importou) |
+| `shell.js` | A moldura: `view`, `crumbs`, `tally`, as **abas de origem**, o indicador de conexão e o botão de reler |
+| `state.js` | Os boards na mão do cliente — **um por origem** (`state.boards[ns]`), num **contêiner mutável**, não num `let` exportado (um binding exportado é cópia viva só para quem já importou) |
 | `prompts.js` | `effortPrompts()` / `issuePrompts()` — o comando que destrava cada estado |
 | `issues.js` | **Puro**: `cleanTitle`, `numberIndex`, `depsOf`, `openDeps` |
 | `graph-layout.js` | **Puro**: `layerize()`, `graphLayout()`, `edgePath()`, `NODE_W/H`, `GAP_X/Y`, `PAD` |
@@ -167,8 +196,10 @@ O `shared/` **não** entrou em `src/`, e é deliberado: `src/` é o que só o se
 | `effort.js` | A página do esforço: kanban, barra de documentos, viewswitch |
 | `pads.js` | Os scratchpads de sessão |
 | `drawer.js` | A gaveta: trilha, `wireRefs()`, redimensionamento, e a troca ao vivo |
-| `router.js` | O hash decide a tela (`route()`, `refresh()`) e o `EventSource` (`connect()`) |
+| `router.js` | O hash decide a **origem** e a tela (`route()`, `activeNs()`, `refresh()`) e o `EventSource` (`connect()`) |
 | `md.js` | O renderer do dialeto `.scratch` (importa `shared/doc.js`) |
+
+**O esforço carrega a sua origem** (`effort.ns`) e o seu diretório (`effort.path`), e é assim que o cliente inteiro sabe em que board procurar. A alternativa era passar um `ns` de view em view até a gaveta — e a gaveta é justamente quem não pode errar: com um slug repetido entre origens, procurar o esforço no board errado não devolve `undefined`, **devolve o esforço errado**. O dado viaja com o objeto; ninguém precisa lembrar de repassá-lo. (`effort.path` é o outro lado disso: com um root só, o cliente remontava `board.root + archive + slug` na mão. Com N, essa conta é do servidor — quem sabe qual root montou o quê é quem os resolveu.)
 
 As views **não esvaziam a tela antes de preencher**: `replaceChildren()`, nunca `innerHTML = ''` seguido de montagem. O `innerHTML = ''` garantia um frame em branco — 26 frames em branco pintados ao entrar em `#/pads`, medidos. Com `replaceChildren()` a árvore nova é montada de lado e trocada de uma vez: o navegador pinta **uma vez só**. Isso vale para `overview.js`, `effort.js` e `pads.js`, e é uma propriedade a manter, não um detalhe de estilo.
 
@@ -198,11 +229,11 @@ Isso vale no servidor e no renderer, e **o servidor já errou aqui** — é o bu
 
 ## Dois vocabulários de caminho
 
-Todo item da API carrega dois nomes para o mesmo arquivo: `path`, o caminho **dentro do container** (`/workspace/.scratch/...`), por onde o board lê; e `ref`, o caminho **como o workspace o vê** (`.scratch/...`), que é o único que faz sentido colar num agente.
+Todo item da API carrega dois nomes para o mesmo arquivo: `path`, o caminho **dentro do container** (`/workspace/scratches/<ns>/...`), por onde o board lê; e `ref`, o caminho **como o workspace o vê** (`.scratch/...`, `vend-server/.scratch/...`), que é o único que faz sentido colar num agente.
 
-O `ref` é derivado no servidor (`refOf`, em `src/paths.js`), não no cliente: quem sabe qual root montou o quê é o processo que resolveu os roots. `SCRATCH_REF` e `PADS_REF` ajustam o mapeamento se os volumes mudarem.
+O `ref` é derivado no servidor (`refIn`, em `src/paths.js`), não no cliente: quem sabe qual root montou o quê é o processo que resolveu os roots — e com N origens isso deixou de ser uma preferência de arquitetura e virou a única forma correta. `HOME_NS` diz qual origem é a de casa (a única de `ref` nu); `PADS_REF` faz o mesmo pelos scratchpads.
 
-A regra prática: **o board lê por `path`; o humano copia `ref`.** Um comando com `/workspace/` dentro não leva a lugar nenhum.
+A regra prática: **o board lê por `path`; o humano copia `ref`.** Um comando com `/workspace/` dentro não leva a lugar nenhum — e um `.scratch/...` nu copiado da origem errada leva a **outro lugar**, que é pior.
 
 O `changed` do push fala **`path`**, o mesmo vocabulário do que a gaveta tem aberto — comparação direta, sem tradução. Os dois caminhos nascem em lugares diferentes (`paths.js` e o `fs.watch`) e são comparados com `===`: uma barra a mais de um lado mataria a gaveta viva **sem um único erro**. Um teste guarda essa igualdade.
 
@@ -243,6 +274,8 @@ Cada estado tem um comando que o destrava, e o board monta esse comando com os c
 O wayfinder é o resolve-tudo: onde existe mapa, ele escolhe o ticket na frontier, reivindica e resolve — não há o que decidir no board, então ele vem primeiro e leva o destaque. Os outros comandos só aparecem onde o wayfinder não alcança.
 
 Issue **bloqueada não recebe comando algum**. Oferecer o prompt seria convidar a furar a fila que o `Blocked by:` desenhou; o board mostra o bloqueio e cala a boca. Esforço arquivado também não: é leitura.
+
+O `<ref>` já vem qualificado pela origem (`/implement vend-server/.scratch/...`), porque o servidor o derivou contra o root certo — o `prompts.js` não sabe que existem origens, e não precisa saber.
 
 Se o vocabulário de skills mudar, o mapeamento vive inteiro em `effortPrompts()` e `issuePrompts()` (**`public/prompts.js`**) — um lugar só, e é onde ele deve continuar.
 
@@ -326,7 +359,7 @@ Como ele se sustenta:
 - **A prosa do `Blocked by:` é o tooltip da aresta** — a justificativa do bloqueio é o que se lê antes de decidir furar a fila.
 - **Os nós são HTML posicionado; o SVG só desenha as curvas.** Assim o chip de status, o foco por teclado e o clique que abre a gaveta são os mesmos da lista, sem reimplementar texto em SVG. Cuidado ao mexer: `el()` monta HTML, e um `<defs>`/`<marker>` criado por ele **não estaria no namespace SVG** — o navegador aceita e ignora, e as setas somem **sem erro nenhum**. Por isso o `svg()`, que hoje mora ao lado do `el()` no `dom.js`, com o porquê escrito entre os dois.
 
-O grafo não inventa nada: as referências do `Blocked by:` são locais ao esforço, então ele nunca cruza slugs, e um esforço sem nenhuma aresta vira uma coluna só — com uma nota dizendo isso, em vez de fingir um desenho.
+O grafo não inventa nada: as referências do `Blocked by:` são locais ao esforço — logo, locais à origem —, então ele nunca cruza slugs nem repositórios, e um esforço sem nenhuma aresta vira uma coluna só, com uma nota dizendo isso em vez de fingir um desenho.
 
 ## Carimbo de filesystem não é eixo de tempo
 
@@ -336,11 +369,33 @@ O `birthtime` existe no ext4 e parece a data de criação do ticket. **Ele não 
 
 Um Gantt construído sobre isso sairia com **barras de duração zero**.
 
-Se o Gantt for um objetivo real, o caminho honesto é **as skills escreverem as datas no `.md`** (`Created:`, `Claimed:`, `Resolved:`): dado que sobrevive à reescrita, é revisável no diff, e é escrito por quem **sabe** (o `/wayfinder` sabe a hora em que reivindicou). Isso é mudança no vocabulário das skills, não no board.
+### Mas o diretório sobrevive — e essa frase acima é generalizada demais
+
+**Cuidado com o título desta seção: ele está certo sobre *arquivo* e errado sobre *diretório*.** A generalização confiante quase matou uma solução inteira, e por isso a correção vem escrita junto.
+
+**Ninguém recria um diretório.** O `mkdir` acontece uma vez, e o `Write` atômico de um `.md` lá dentro não toca o inode do diretório. Então:
+
+- **O `birthtime` do diretório de um esforço é a data de criação dele — de verdade.** E ele **sobrevive ao `mv` do arquivamento**, porque `rename` preserva inode. Medido nos três esforços já arquivados: `birthtime` de 10/07, 10/07 e 12/07, com o `ctime` marcando o `mv` (12/07). **Isso é início e fim reais de um esforço, no disco, hoje.**
+- **O `mtime` de um ticket `resolved` é, na prática, a resolução dele** — a última escrita num ticket fechado *foi* a que o fechou. Medido: os 14 tickets do `scratch-board-push-refactor`, ordenados por `mtime`, saem em `01 → 02 → 08 → 03 → 04 → 05 → 06 → 07 → 11 → 10 → 12 → 09 → 13 → 14` — **exatamente** a ordem de resolução que o mapa registra.
+- **O `mtime` de um ticket parado é quando ele entrou no estado atual**, porque ticket encalhado é, por definição, ticket que ninguém tocou.
+
+Ou seja: **há backfill, e ele é real.** O que *não* se recupera é o `created` **por ticket** — para isso, o diretório do esforço dá um **piso** honesto (o ticket não pode ser mais velho que o esforço).
+
+### O `mtime` no payload mata o push — mas a *ordem* não
+
+A armadilha verdadeira é outra, e é fina. **O `mtime` cru não pode entrar no payload**: ele muda a **cada** salvamento do agente, o hash do board se move, e o evento vira `message` (~71 KB + re-render) em vez do `files` (~126 bytes). Isso colapsaria as duas supressões independentes (ver **Dois eventos**) — a regressão contra a qual `src/board.js:16` e `src/cache.js:13` avisam. O teste que proíbe a string `mtime` no board serializado é o guarda disso.
+
+**Mas ordenar por `mtime` não exige publicá-lo.** O servidor ordena e **não emite o campo**: só a *ordem* viaja. O hash se move quando o **ranking** muda — que é quando a tela reordena de verdade, um push legítimo. O agente salva o ticket X, ele sobe ao topo, e os dez salvamentos seguintes **não movem nada**, porque ele já está em primeiro.
+
+E o que precisar de carimbo visível ("parado há 6 dias") entra **quantizado por dia**: dez salvamentos no mesmo dia dão o mesmo valor, o campo não se move, o hash não se move. A precisão que "task velha" pede **é** dia.
+
+**A regra que sobra, e essa é absoluta: nada de tempo *relativo* no payload.** O servidor manda ISO absoluto; o `"há 3 dias"` se calcula no navegador. Uma string relativa muda **com o relógio** — a varredura de 90s a recalcularia, o hash se moveria, e o board empurraria sozinho, parado, para sempre. Seria o polling ressuscitado, e pior: barulhento sem ninguém ter escrito nada.
+
+O eixo de tempo vive em `.scratch/scratch-board-eixo-de-tempo/`.
 
 ## Os testes
 
-`node --test test/` — **94 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
+`node --test test/` — **114 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
 
 | Costura | O que trava |
 | --- | --- |
@@ -349,8 +404,10 @@ Se o Gantt for um objetivo real, o caminho honesto é **as skills escreverem as 
 | `test/graph-layout.test.js` | Os invariantes do grafo (puros): a camada é o **maior** caminho, nenhuma aresta anda para trás, ciclo não estoura, o baricentro, e o guarda que impede o módulo de voltar a tocar o DOM. |
 | `test/server.test.js` | **A costura mais alta.** Servidor de verdade em porta efêmera contra um `.scratch/` temporário, stream SSE lido com o `fetch` nativo, **arquivos escritos de verdade no disco**: o push, o debounce, a supressão, o esforço novo que aparece sem restart, o caminho fora do root recusado, os dois eventos (`message` × `files`), e a **segunda escrita atômica** do mesmo arquivo — o teste que o watcher derrubaria, e o que impede alguém de "simplificar" o digest de volta para a lista de caminhos. |
 | `test/watch.test.js` | O reopen depois do `error`, e um root que ainda não existe. |
-| `test/sweep.test.js` | A varredura de segurança. **Arquivo separado de propósito**: o `cache.js` guarda o hash num módulo, e o `node --test` dá um processo por arquivo — dois servidores no mesmo processo dividiriam o mesmo hash. |
-| `test/drawer.test.js` | O que a gaveta **assume sobre o mundo**: que o `changed` fala o mesmo vocabulário de caminho que o board, e que a string do 404 é a que ela procura. |
+| `test/sweep.test.js` | A varredura de segurança. **Arquivo separado** porque ela precisa de um relógio curto (`sweep: 300`), e um servidor que empurra sozinho a cada 300ms envenenaria as asserções de silêncio do `server.test.js`. (Já foi separado por outro motivo — o hash de módulo do `cache.js` —, e esse motivo acabou.) |
+| `test/namespaces.test.js` | O que **só existe com mais de uma origem**: a descoberta e a ordem, o `ref` nu da de casa contra o qualificado das outras, **dois esforços com o mesmo slug** que não se confundem, o push que carrega o `ns` e **só o board da sua origem**, a supressão que **não atravessa** (escrever o mesmo byte numa não cega a outra), a origem vazia contra a **quebrada**, o erro que passa pelo hash em vez de gritar a cada varredura, e o snapshot de conexão trazendo uma origem por frame. |
+| `test/drawer.test.js` | O que a gaveta **assume sobre o mundo**: que o `changed` fala o mesmo vocabulário de caminho que o board, que a string do 404 é a que ela procura, e que o esforço publica `ns` e `path` — os dois campos com que ela acha o board certo. |
+| `test/pads.test.js` | A **poda** dos scratchpads: o `node_modules` do topo e o **aninhado**, as contagens, os bytes e a **recência** que ele não pode sequestrar, o vizinho recursivo que sobrevive com o `ref` absoluto real, a sessão que só deixou dependência e por isso some, e o arquivo *chamado* `node_modules` que **é conteúdo** — o teste que separa a poda na travessia de um filtro por nome depois dela. |
 
 **Um bom teste aqui exercita comportamento externo, nunca o desenho interno.** "O debounce usa um timer de 120ms" é implementação e quebra na primeira melhoria; "seis escritas seguidas produzem **um** evento" é comportamento, e é esse que está escrito.
 
@@ -365,11 +422,21 @@ Duas armadilhas de quem for medir ou testar o push:
 
 `/tmp/claude-0/-root-projetos/<session-id>/scratchpad/` é onde os agentes largam arquivo temporário. O board monta isso em `/workspace/pads` **read-only** e serve em `#/pads`.
 
-É um segundo root, não uma extensão do `.scratch`: `safePath()` prende qualquer caminho vindo do cliente a um dos dois. Rascunho de agente o board lê e não toca — como, aliás, ele não toca em nada.
+**Eles não são uma origem**, e a distinção é de natureza, não de arrumação: uma origem é um `.scratch/` versionado que as skills mantêm; um scratchpad é lixo de sessão em `/tmp`, que some no reboot. Por isso `#/pads` fica **fora** das abas, é global (só a sessão deste workspace), e o `ref` de um pad é o **caminho absoluto real** — ele vale a partir de qualquer cwd, e é a única forma de ser colável. `safePath()` prende qualquer caminho vindo do cliente aos roots das origens **mais** este. Rascunho de agente o board lê e não toca — como, aliás, ele não toca em nada.
 
 Os pads **não são vigiados**, e é decisão: eles vivem em `/tmp`, são escritos por toda sessão de agente e mudam muito mais que o `.scratch/`. Vigiar esse churn seria ruído puro. Eles continuam **sob demanda**, buscados quando você entra em `#/pads`. (O `ago()` usa o `mtime` dos *arquivos* de pad, que é coisa diferente do `mtime` de diretório que saiu do board.)
 
 Sessão sem nenhum arquivo é omitida — a maioria nunca escreve nada e listá-las afogaria as poucas com conteúdo. O diretório vive em `/tmp`: some no reboot do WSL, e o board não promete o contrário. Não construa nada que dependa dele persistir.
+
+### `node_modules` é deliberadamente invisível
+
+Uma sessão que roda `npm install` no scratchpad larga uma **árvore de projeto inteira** ali. O board **poda** todo diretório `node_modules`, em qualquer profundidade — e a poda é da **travessia**, não da exibição: o `continue` vem antes da recursão, e os descendentes nunca são visitados. Medido contra um `node_modules` de 400 pacotes (14.400 arquivos): `listPads()` caía para **935ms** e o card anunciava **14.404 arquivos**, afogando os 4 rascunhos que a sessão de fato escreveu. Com a poda: **0,6ms** e **4 arquivos**. Filtrar depois de andar a árvore devolveria a lista certa **pagando a conta inteira** — é a "simplificação" que o `pads.test.js` mantém vermelha.
+
+Nada de dentro de um `node_modules` entra em lugar nenhum: nem nos cards, nem na contagem, nem nos bytes, nem na **recência** (o `mtime` do card é o máximo dos arquivos, então um `index.js` recém-instalado sequestraria a ordem da lista e o "há N min"). Uma sessão cujo scratchpad é *só* dependência instalada some da lista — ela não rascunhou nada.
+
+**O critério de pertinência é derivado × rascunhado, e não peso.** `node_modules` não é o que a sessão escreveu: é o que uma ferramenta baixou para ela, é reconstruível a partir de um `package.json`, e ninguém vai abrir um arquivo dele na gaveta. `__pycache__` e `.venv` passariam no mesmo teste no dia em que aparecerem. **Um diretório de saída não passa** — um `data/` com 560 MB de CSV e um `.duckdb` que o agente gerou *é* o trabalho da sessão (existe um, na frota, e o board o mostra inteiro: 52 arquivos, 831,9 MB). Podá-lo por ser grande seria o board mentindo sobre o que a sessão fez, e mentir sobre o disco é o pecado que este projeto existe para não cometer. Quem quiser esconder peso tem a gaveta, que já recusa exibir acima de 512 KB.
+
+A poda é de **diretório**, não de nome: um arquivo comum que por acaso se chame `node_modules` é conteúdo, e continua visível. Há teste, e é ele que separa a poda de verdade do filtro por nome.
 
 Artifacts do claude.ai ficaram **de fora** por não existirem em disco: são uma API remota que só o agente alcança. Não há o que montar.
 

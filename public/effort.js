@@ -6,7 +6,7 @@
  * navegação, e assim o grafo de um esforço vira um link colável.
  */
 import { el, esc, copyBtn } from './dom.js'
-import { state } from './state.js'
+import { boardOf } from './state.js'
 import { view, crumbs, tally } from './shell.js'
 import { effortPrompts, promptStrip } from './prompts.js'
 import { cleanTitle, openDeps } from './issues.js'
@@ -38,14 +38,16 @@ function issueCard(issue, effort, archived) {
   return card
 }
 
-export function renderEffort(slug, archived, graph = false) {
-  const board = state.board
+export function renderEffort(ns, slug, archived, graph = false) {
+  const board = boardOf(ns)
   const pool = archived ? board.archived : board.efforts
   const effort = pool.find((e) => e.slug === slug)
-  if (!effort) return (location.hash = '')
+  // O esforço é procurado **dentro da origem**: o mesmo slug em outra origem é outro
+  // esforço, e nunca é este. Não achou aqui, volta para a visão geral **desta** origem.
+  if (!effort) return (location.hash = `#/${ns}`)
 
   const back = el('<button>← esforços</button>')
-  back.onclick = () => (location.hash = '')
+  back.onclick = () => (location.hash = `#/${ns}`)
   const here = el(`<span>/ ${esc(slug)}</span>`)
   here.append(copyBtn(slug, 'slug'))
   crumbs.replaceChildren(back, here)
@@ -69,8 +71,11 @@ export function renderEffort(slug, archived, graph = false) {
 
   for (const doc of effort.docs) {
     const b = el(`<button class="act">${esc(doc.name)}</button>`)
+    // O caminho sai do `path` do próprio esforço — que o servidor já calculou contra o root
+    // da origem certa. Remontá-lo aqui (root + archive + slug) era possível quando havia um
+    // root só; com N origens seria o cliente refazendo, na mão, a conta de que root é quem.
     b.onclick = () =>
-      openDrawer(`${board.root}/${archived ? 'archive/' : ''}${slug}/${doc.name}`, {
+      openDrawer(`${effort.path}/${doc.name}`, {
         eyebrow: slug,
         title: doc.title ?? doc.name,
         ref: `${effort.ref}/${doc.name}`,
@@ -87,7 +92,7 @@ export function renderEffort(slug, archived, graph = false) {
 
   // A visão escolhida vive no hash, não em `localStorage`: é onde já vive o resto da
   // navegação, e um link para o grafo de um esforço passa a ser colável.
-  const base = `#/${archived ? 'archive/' : ''}${slug}`
+  const base = `#/${ns}/${archived ? 'archive/' : ''}${slug}`
   const swap = el(`
     <div class="viewswitch" role="tablist">
       <button role="tab" class="${graph ? '' : 'on'}" aria-selected="${!graph}">lista</button>

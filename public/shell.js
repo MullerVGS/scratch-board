@@ -12,13 +12,47 @@
  * tentando voltar, vermelho quando desistiu de fingir. Ele é a única coisa na tela que
  * pode dizer *não sei*, e é por isso que ele existe.
  */
-import { el, toast } from './dom.js'
+import { el, esc, toast } from './dom.js'
+import { state } from './state.js'
 
 export const view = document.getElementById('view')
 export const crumbs = document.getElementById('crumbs')
 export const tally = document.getElementById('tally')
 
 const dot = document.querySelector('h1 .dot')
+const tabs = document.getElementById('ns-tabs')
+
+/**
+ * As abas de origem — a única superfície que diz que existe mais de um `.scratch/`.
+ *
+ * Cada aba mostra quantas issues a origem tem em aberto, e **a contagem é relida a cada
+ * push**, inclusive o de uma origem que não está na tela. É de propósito: sem isso, uma
+ * origem inativa que andou seria indistinguível de uma parada, e o board voltaria a ficar
+ * mudo sobre o que não está debaixo do olho — que é a doença que o push inteiro cura. A aba
+ * é o "não sei" do indicador de conexão, um andar acima: ela sabe, e mostra.
+ *
+ * Só o número muda sozinho; a tela não. Trocar de origem é navegar, e navegar é do humano.
+ *
+ * Com uma origem só, não há o que escolher e a faixa não aparece — o board fica exatamente
+ * como era antes de existirem origens.
+ */
+export function renderTabs(active) {
+  if (state.namespaces.length < 2) return tabs.replaceChildren()
+
+  tabs.replaceChildren(
+    ...state.namespaces.map((name) => {
+      const board = state.boards[name]
+      const abertas = board ? board.efforts.reduce((n, e) => n + (e.total - e.closed), 0) : 0
+      return el(`
+        <a class="nstab ${name === active ? 'on' : ''}" href="#/${esc(name)}"
+           aria-current="${name === active}">
+          <span>${esc(name)}</span>
+          ${board?.error ? '<b class="bad" title="falha ao ler esta origem">!</b>' : `<b>${abertas}</b>`}
+        </a>
+      `)
+    }),
+  )
+}
 
 /** Quanto tempo tentando reconectar antes de admitir que o servidor não está lá. */
 const DEAD_MS = 6000

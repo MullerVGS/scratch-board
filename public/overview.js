@@ -1,9 +1,14 @@
 /**
- * A visão geral: os esforços do `.scratch/`, agrupados pelo que o board classifica —
- * ativos, prontos para arquivar, parados, arquivados.
+ * A visão geral de **uma origem**: os esforços do `.scratch/` dela, agrupados pelo que o
+ * board classifica — ativos, prontos para arquivar, parados, arquivados.
+ *
+ * Ela desenha o board de um namespace e não sabe que existem outros. Origem vazia é um
+ * estado legítimo (um `.scratch/` recém-montado, um repo que ainda não tem esforço), e
+ * origem que não deu para ler é **outro** estado — e os dois se dizem com palavras
+ * diferentes, porque confundi-los seria o board fingindo que sabe.
  */
 import { el, esc, copyBtn } from './dom.js'
-import { state } from './state.js'
+import { boardOf } from './state.js'
 import { view, crumbs, tally } from './shell.js'
 
 // ---------- chips de status ----------
@@ -65,7 +70,9 @@ function effortCard(e, archived = false) {
   `)
   card.querySelector('h3').append(copyBtn(e.slug, 'slug'))
 
-  const open = () => (location.hash = `#/${archived ? 'archive/' : ''}${e.slug}`)
+  // O slug sozinho não endereça nada: dois esforços podem ter o mesmo em origens diferentes.
+  // Quem endereça é a origem **mais** o slug, e é o esforço que carrega a sua origem.
+  const open = () => (location.hash = `#/${e.ns}/${archived ? 'archive/' : ''}${e.slug}`)
   card.onclick = open
   card.onkeydown = (ev) => {
     if (ev.key === 'Enter' || ev.key === ' ') {
@@ -93,9 +100,25 @@ function section(title, blurb, efforts, archived = false) {
   return node
 }
 
-export function renderOverview() {
-  const board = state.board
+export function renderOverview(ns) {
+  const board = boardOf(ns)
   crumbs.replaceChildren()
+
+  // A origem não deu para ler. **Vazia e quebrada são coisas diferentes**, e o board diz
+  // qual das duas é: fingir a primeira quando é a segunda seria mostrar um `.scratch/` sem
+  // esforço nenhum a quem tem esforços — a mentira mais cara que este board pode contar.
+  if (board.error) {
+    view.replaceChildren(
+      el(`
+        <p class="empty bad">
+          <strong>Falha ao ler <code>${esc(board.ref)}</code>.</strong>
+          ${esc(board.error)}
+        </p>
+      `),
+    )
+    tally.textContent = 'origem ilegível'
+    return
+  }
 
   const archivable = board.efforts.filter((e) => e.archivable)
   const stalled = board.efforts.filter((e) => !e.archivable && e.stalled)
@@ -120,7 +143,8 @@ export function renderOverview() {
   // a página vazia antes de pintar a página nova, e é isso que se vê como piscada. A
   // árvore nova é montada de lado e trocada de uma vez: uma pintura só.
   if (!sections.length) {
-    view.replaceChildren(el('<p class="empty">Nenhum esforço em .scratch/</p>'))
+    view.replaceChildren(el(`<p class="empty">Nenhum esforço em <code>${esc(board.ref)}</code></p>`))
+    tally.textContent = `0 esforços`
     return
   }
   view.replaceChildren(...sections)

@@ -1,8 +1,13 @@
-// O board: ler o `.scratch/` do disco e montar a projeção que a API serve.
+// O board: ler o `.scratch/` **de uma origem** e montar a projeção que a API serve.
 //
 // Esforços, issues e as arestas de bloqueio entre elas. Nada de parsing aqui — o dialeto
 // dos `.md` mora em `shared/doc.js`, que o browser também importa. Nada de HTTP: este
 // módulo não sabe que existe um servidor.
+//
+// **Uma origem por board.** `buildBoard(ns)` monta o board de *um* namespace, e nada aqui
+// sabe que existem outros: o isolamento não é uma regra que alguém precise lembrar de
+// respeitar, é a forma da função. Dois esforços com o mesmo slug em origens diferentes são
+// dois esforços, sem uma linha de código para separá-los.
 //
 // E **nada de cache**: `buildBoard()` é, por contrato, "leia o disco agora". Quem guarda o
 // resultado e decide se ele mudou é o `cache.js`; separar as duas coisas é o que faz a
@@ -28,16 +33,16 @@ import {
   summarize,
 } from '../shared/doc.js'
 
-import { SCRATCH, ARCHIVE, refOf } from './paths.js'
+import { refIn } from './paths.js'
 
-async function readIssue(effortSlug, dir, file) {
+async function readIssue(ns, effortSlug, dir, file) {
   const path = join(dir, file)
   const { header, title } = parseDoc(await readFile(path, 'utf8'))
   const status = normalizeStatus(header.status)
   return {
     file,
     path,
-    ref: refOf(path),
+    ref: refIn(ns, path),
     id: `${effortSlug}/${file}`,
     number: /^(\d+)/.exec(file)?.[1] ?? '',
     title: title ?? file.replace(/\.md$/, ''),
@@ -50,7 +55,7 @@ async function readIssue(effortSlug, dir, file) {
   }
 }
 
-export async function readEffort(root, slug) {
+export async function readEffort(ns, root, slug) {
   const dir = join(root, slug)
   const issuesDir = join(dir, 'issues')
 
@@ -59,10 +64,12 @@ export async function readEffort(root, slug) {
     files = (await readdir(issuesDir)).filter((f) => extname(f) === '.md').sort()
   } catch { /* esforço sem issues/ — só PRD, é válido */ }
 
-  const issues = await Promise.all(files.map((f) => readIssue(slug, issuesDir, f)))
+  const issues = await Promise.all(files.map((f) => readIssue(ns, slug, issuesDir, f)))
 
   // Um item está bloqueado se qualquer issue que ele lista ainda não fechou. Uma
-  // referência a issue que não existe não bloqueia: não há o que esperar.
+  // referência a issue que não existe não bloqueia: não há o que esperar. As referências
+  // são locais ao esforço — logo, locais à origem: um `Blocked by: 02` nunca atravessa
+  // um namespace, nem quando o slug do outro lado é o mesmo.
   const byNumber = new Map(issues.map((i) => [i.number.padStart(2, '0'), i]))
   for (const issue of issues) {
     issue.blocked = issue.blockedBy.some((d) => {
@@ -91,8 +98,15 @@ export async function readEffort(root, slug) {
   const moving = issues.some((i) => !['needs-triage', 'needs-info'].includes(i.status))
 
   return {
+    // O esforço sabe de que origem veio, e é assim que o cliente inteiro sabe: o `ns` viaja
+    // no dado em vez de ser um parâmetro que cada view teria que lembrar de repassar. É o
+    // que impede um card de uma origem de abrir a gaveta contra o board de outra.
+    ns: ns.name,
     slug,
-    ref: refOf(dir),
+    // O diretório do esforço, no vocabulário do container. Com ele, o cliente compõe o
+    // caminho de um documento (`<path>/map.md`) sem remontar o root da origem na mão.
+    path: dir,
+    ref: refIn(ns, dir),
     docs,
     title: lede?.title ?? null,
     blurb: lede?.blurb ?? '',
@@ -121,9 +135,37 @@ async function listSlugs(root) {
   }
 }
 
-export async function buildBoard() {
-  const [activeSlugs, archivedSlugs] = await Promise.all([listSlugs(SCRATCH), listSlugs(ARCHIVE)])
-  const efforts = await Promise.all(activeSlugs.map((s) => readEffort(SCRATCH, s)))
-  const archived = await Promise.all(archivedSlugs.map((s) => readEffort(ARCHIVE, s)))
-  return { root: SCRATCH, columns: COLUMNS, statuses: KNOWN, efforts, archived }
+/**
+ * A projeção de **uma** origem. Um root que não existe, ou que existe vazio, devolve um
+ * board vazio — e vazio é um estado legítimo, que a tela sabe mostrar.
+ */
+export async function buildBoard(ns) {
+  const archiveRoot = join(ns.root, 'archive')
+  const [activeSlugs, archivedSlugs] = await Promise.all([listSlugs(ns.root), listSlugs(archiveRoot)])
+  const efforts = await Promise.all(activeSlugs.map((s) => readEffort(ns, ns.root, s)))
+  const archived = await Promise.all(archivedSlugs.map((s) => readEffort(ns, archiveRoot, s)))
+  return { ns: ns.name, root: ns.root, ref: ns.ref, columns: COLUMNS, statuses: KNOWN, efforts, archived }
 }
+
+/**
+ * O board de uma origem que **não deu para ler** — um `.md` sem permissão, um mount que
+ * sumiu por baixo, um diretório que o disco recusou.
+ *
+ * Ele existe para que a falha fique **contida na origem que falhou**: sem ele, uma leitura
+ * que estoura derrubaria a montagem das outras, e um repositório com um arquivo quebrado
+ * apagaria o board inteiro. E ele **diz o que houve** em vez de fingir que a origem está
+ * vazia — vazio e quebrado são coisas diferentes, e confundi-las é a mentira de sempre.
+ *
+ * A forma é a mesma de um board de verdade (mesmas chaves, listas vazias), então a
+ * supressão por hash continua valendo: enquanto o erro for o mesmo, ele não é reempurrado.
+ */
+export const errorBoard = (ns, error) => ({
+  ns: ns.name,
+  root: ns.root,
+  ref: ns.ref,
+  columns: COLUMNS,
+  statuses: KNOWN,
+  efforts: [],
+  archived: [],
+  error,
+})

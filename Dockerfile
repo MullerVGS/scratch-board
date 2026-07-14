@@ -6,7 +6,9 @@ COPY shared ./shared
 COPY public ./public
 
 ENV PORT=7777
-ENV SCRATCH_DIR=/workspace/.scratch
+# O diretório comum das origens. Cada filho direto dele é um namespace completo, e quem os
+# monta é o compose — não há lista de origens em env nem em arquivo de config.
+ENV SCRATCHES_DIR=/workspace/scratches
 EXPOSE 7777
 
 CMD ["node", "src/server.js"]
