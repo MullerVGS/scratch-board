@@ -132,6 +132,24 @@ const get = (path) => fetch(`${base}${path}`)
 const board = async () => (await (await get('/api/board')).json()).boards.projetos
 const effortOf = (b, slug) => b.efforts.find((e) => e.slug === slug)
 
+/**
+ * A posição de um esforço na lista que o servidor publica.
+ *
+ * **Cuidado com o que isso significa na tela.** No kanban, sim: `effort.js` desenha a coluna
+ * filtrando `effort.issues`, e `filter` preserva a ordem — a ordem do array *é* a ordem da
+ * coluna. **Na visão geral, não**: o `overview.js` **particiona** os esforços em seções de
+ * ordem fixa (Ativos, Prontos para arquivar, Parados), então esta ordem vale **dentro de
+ * cada seção**, não na tela inteira. É uma limitação assumida — ver "A ordem por atividade"
+ * no `AGENTS.md`.
+ */
+const posOf = (b, slug) => b.efforts.findIndex((e) => e.slug === slug)
+
+/** Envelhece um arquivo. `utimes` fabrica o tempo no disco — não há relógio a mockar. */
+const age = (rel, days) => {
+  const when = new Date(Date.now() - days * 864e5)
+  return utimes(join(root, rel), when, when)
+}
+
 before(async () => {
   mounts = await mkdtemp(join(tmpdir(), 'board-mounts-'))
   root = join(mounts, 'projetos')
@@ -161,7 +179,10 @@ test('a origem de casa produz refs nus — é ela que o agente já tem debaixo d
   // `projetos/.scratch/...` seria um caminho que não existe a partir de lá.
   const alpha = effortOf(await board(), 'alpha')
   assert.equal(alpha.ref, '.scratch/alpha')
-  assert.equal(alpha.issues[0].ref, '.scratch/alpha/issues/01-um.md')
+  // Procura-se a issue **pelo arquivo**, não pela posição: o que se afirma aqui é o
+  // vocabulário do `ref`, e ele não pode depender da ordem — que é por atividade, e muda.
+  const um = alpha.issues.find((i) => i.file === '01-um.md')
+  assert.equal(um.ref, '.scratch/alpha/issues/01-um.md')
   // E o caminho do container nunca vaza para o vocabulário do humano.
   assert.equal(alpha.ref.includes(mounts), false)
 })
@@ -180,6 +201,14 @@ test('effort.mtime não está no payload — o carimbo que mataria a supressão 
   assert.equal('mtime' in alpha, false)
   // E não é só o esforço: nada do board carrega carimbo de filesystem.
   assert.equal(JSON.stringify(b).includes('mtime'), false)
+
+  // **E o carimbo não volta com outro nome.** O `board.js` lê o `mtime` para *ordenar* e o
+  // chama de `at` — um `grep` por "mtime" não o veria. A proibição é do **carimbo**, não da
+  // palavra: publicá-lo como `at` mataria a supressão exatamente do mesmo jeito.
+  assert.equal('at' in alpha, false, 'o carimbo que ordena não pode viajar no esforço')
+  for (const i of alpha.issues) {
+    assert.equal('at' in i, false, 'o carimbo que ordena não pode viajar na issue')
+  }
 })
 
 test('escrever um .md empurra um board novo, e ele reflete a mudança', async () => {
@@ -327,10 +356,18 @@ test('reescrever o CORPO com bytes idênticos não emite nem `files` — a supre
   const mesmo = 'Status: resolved\nType: task\n\n# 02 — Dois\n\n## Answer\n\nA resposta, e ela não muda mais.\n'
   const stream = await openStream()
   try {
+    // A primeira escrita é **preparo**, e o que ela empurra não interessa aqui: pode ser um
+    // `files` (só o corpo mudou) ou um `message` (se ela também reordenou a coluna — ordem é
+    // board, ver "a ordem por atividade" no fim deste arquivo). O teste não afirma sobre ela,
+    // de propósito: amarrá-la a um evento específico prenderia este teste ao estado que os
+    // testes anteriores deixaram no disco, e ele quebraria ao se reordenar um vizinho.
     await put('alpha/issues/02-dois.md', mesmo)
-    assert.equal((await stream.next()).event, 'files') // a mudança de verdade, que chega
+    await stream.next()
+    stream.drain()
 
-    await put('alpha/issues/02-dois.md', mesmo) // e agora a mesma coisa, de novo
+    // **É esta a asserção.** Os mesmos bytes, de novo: o conteúdo não mudou, e o `02` agora
+    // já é o primeiro — nem o digest se move, nem o ranking. Zero byte no fio.
+    await put('alpha/issues/02-dois.md', mesmo)
     await stream.silence()
   } finally {
     stream.close()
@@ -436,4 +473,117 @@ test('o board é servível: /, /app.js e o /shared/doc.js que o browser importa'
 
   // E o estático não escapa do seu root.
   assert.equal((await get('/shared/../src/server.js')).status, 404)
+})
+
+// ---------- a ordem por atividade ----------
+//
+// O board saía em ordem **alfabética**, que não carrega informação nenhuma: abrir a visão
+// geral não dizia onde o trabalho estava acontecendo. Agora o esforço onde o agente está
+// escrevendo é o primeiro card, e dentro dele o ticket quente é o primeiro da coluna.
+//
+// **Para ordenar, publica-se a ordem — não o carimbo.** O `mtime` cru mudaria a cada
+// salvamento, moveria o hash do board e faria o evento virar `message` (~71 KB + re-render)
+// em vez do `files` (~126 bytes) — colapsando as duas supressões. O teste que proíbe a
+// string `mtime` no board serializado é o guarda disso, e ele continua verde acima.
+
+test('os esforços saem ordenados por atividade: o trabalho quente é o primeiro card', async () => {
+  await put('gelado/PRD.md', '# Gelado\n\nNinguém toca nele há uma semana.\n')
+  await put('quente/PRD.md', '# Quente\n\nAcabaram de mexer.\n')
+  await age('gelado/PRD.md', 7)
+
+  const b = await board()
+
+  // Na ordem alfabética, `gelado` vinha **antes** de `quente` — é essa a ordem que morreu.
+  assert.equal(posOf(b, 'quente'), 0, 'o esforço mexido por último tem que abrir a tela')
+  assert.equal(
+    posOf(b, 'gelado'),
+    b.efforts.length - 1,
+    'o esforço parado há uma semana tem que ser o último',
+  )
+})
+
+test('as issues saem ordenadas por atividade dentro da coluna do kanban', async () => {
+  // Os três na **mesma** coluna, de propósito: é dentro de uma coluna que o olho procura o
+  // ticket quente, e o kanban (`public/effort.js`) a desenha filtrando esta lista. Como
+  // `filter` preserva a ordem, ordenar o array uma vez ordena **dentro de cada coluna**.
+  for (const [file, titulo] of [
+    ['01-velho.md', '01 — Velho'],
+    ['02-medio.md', '02 — Médio'],
+    ['03-novo.md', '03 — Novo'],
+  ]) {
+    await put(`kanban/issues/${file}`, issue(titulo, 'ready-for-agent'))
+  }
+  await age('kanban/issues/01-velho.md', 9)
+  await age('kanban/issues/02-medio.md', 3)
+
+  const k = effortOf(await board(), 'kanban')
+
+  assert.equal(
+    new Set(k.issues.map((i) => i.column)).size,
+    1,
+    'os três têm que estar na mesma coluna, senão o teste não fala de coluna nenhuma',
+  )
+  // A ordem **numérica** — a de antes — sairia `01, 02, 03`. A de atividade a inverte, e é
+  // essa inversão que prova que a ordenação é por tempo e não pelo nome do arquivo.
+  assert.deepEqual(
+    k.issues.map((i) => i.file),
+    ['03-novo.md', '02-medio.md', '01-velho.md'],
+  )
+})
+
+/**
+ * O corpo de uma issue **não é projetado** — o board lê dela o `Status:`, o `Type:`, o título
+ * e o `Blocked by:`, e nada mais. Então reescrever só o corpo deixa a projeção byte-a-byte
+ * idêntica, e a **única** coisa que pode mover o hash do board é o `mtime` mudando a **ordem**.
+ *
+ * É o que isola a propriedade nos dois testes abaixo: o que empurra ali é o ranking, e nada
+ * além dele.
+ */
+const body = (n) => `Status: ready-for-agent\nType: task\n\n# 01 — A\n\nParágrafo ${n}.\n`
+
+test('escrever o ticket que NÃO era o primeiro reordena a coluna e empurra o board', async () => {
+  await put('fila/issues/01-a.md', issue('01 — A', 'ready-for-agent'))
+  await put('fila/issues/02-b.md', issue('02 — B', 'ready-for-agent'))
+  await age('fila/issues/01-a.md', 5)
+
+  const antes = effortOf(await board(), 'fila')
+  assert.deepEqual(antes.issues.map((i) => i.file), ['02-b.md', '01-a.md'], 'o 02 é o quente')
+
+  const stream = await openStream()
+  try {
+    // O agente mexe no `01` — o que estava em **segundo**. Só o corpo: nenhum campo que o
+    // board projeta muda. O que muda é o ranking.
+    await put('fila/issues/01-a.md', body(1))
+
+    const ev = await stream.next()
+    assert.equal(ev.event, 'message', 'a tela reordenou de verdade: isso é um push legítimo')
+    assert.deepEqual(
+      effortOf(ev.board, 'fila').issues.map((i) => i.file),
+      ['01-a.md', '02-b.md'],
+      'o ticket em que o agente está escrevendo tem que subir ao topo da coluna',
+    )
+  } finally {
+    stream.close()
+  }
+})
+
+test('e os salvamentos seguintes — com ele já em primeiro — não movem o board', async () => {
+  // "O agente salva o ticket X: ele sobe ao topo (um push), e os dez salvamentos seguintes
+  // **não movem nada**, porque ele já está em primeiro." É esta a frase virando teste, e é
+  // ela que faz a ordenação ser barata: o hash só se mexe quando o **ranking** se mexe.
+  //
+  // Os ~126 bytes do `files` continuam indo — eles são o que mantém a gaveta viva enquanto o
+  // agente escreve. O que **não** vai é o board inteiro (~71 KB) e o re-render que ele arrasta.
+  const stream = await openStream()
+  try {
+    for (const n of [2, 3, 4]) {
+      await put('fila/issues/01-a.md', body(n))
+
+      const ev = await stream.next()
+      assert.equal(ev.event, 'files', `o salvamento ${n} repintou o board sem o ranking ter mudado`)
+      assert.equal('board' in ev, false, 'o board não pode viajar quando ninguém reordenou')
+    }
+  } finally {
+    stream.close()
+  }
 })

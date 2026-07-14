@@ -43,7 +43,7 @@ As decisões que caem daí, e o que cada uma protege:
 
 ```
 docker compose up -d      # http://localhost:7777 (só loopback)
-node --test test/         # 114 testes, zero dependências
+node --test test/         # 118 testes, zero dependências
 ```
 
 `src/`, `shared/` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta. **Mexer nas origens é a exceção**: elas são descobertas no `start()`, então um mount novo pede `docker compose up -d --force-recreate`, não um restart.
@@ -89,7 +89,9 @@ Um teste afirma que a string `mtime` não aparece em lugar nenhum do board seria
 
 ### Dois eventos, e duas supressões independentes
 
-**O board e o arquivo são duas coisas diferentes.** O board projeta `Status:`, título e `Blocked by:` — e **nada do corpo**. Um agente escrevendo a `## Answer` do ticket que você tem aberto na gaveta não move um pixel do board.
+**O board e o arquivo são duas coisas diferentes.** O board projeta `Status:`, título e `Blocked by:` — e **nada do corpo**. Um agente escrevendo a `## Answer` do ticket que você tem aberto na gaveta não move um pixel do *conteúdo* do board.
+
+**Mas move a ordem, e ordem é board — uma vez.** Desde que os cards saem **por atividade** (ver **A ordem por atividade**), a primeira escrita num ticket que **não era o primeiro** da coluna o traz ao topo: o ranking muda, e essa mudança é um `message` legítimo, porque a tela de fato reordenou. Da segunda escrita em diante ele **já está em primeiro**, o ranking não se mexe, e os salvamentos seguintes voltam a ser `files` de ~126 bytes. Um push por ticket que esquenta, não um por salvamento — e é por isso que a ordenação foi barata.
 
 Por isso o fio tem dois eventos, e o `sync()` tem duas supressões que **não podem ser colapsadas numa só**:
 
@@ -393,16 +395,41 @@ E o que precisar de carimbo visível ("parado há 6 dias") entra **quantizado po
 
 O eixo de tempo vive em `.scratch/scratch-board-eixo-de-tempo/`.
 
+## A ordem por atividade
+
+**O esforço onde o agente está escrevendo é o primeiro card da tela, e dentro dele o ticket quente é o primeiro da coluna.** Os esforços saíam em **ordem alfabética** e as issues por nome de arquivo — nenhuma das duas carrega informação, e abrir a visão geral não dizia onde o trabalho estava acontecendo.
+
+A técnica é a da seção acima, e é ela que faz isto ser barato: **para ordenar, publica-se a ordem — não o carimbo.** O `board.js` lê o `mtime`, ordena, e **o carimbo morre ali** (`buildBoard()`, no `.map()` final). O hash se move quando o **ranking** muda, que é quando a tela reordena de verdade.
+
+Quatro decisões, e cada uma protege alguma coisa:
+
+- **A atividade é a dos arquivos que o board *projeta* — nunca o `mtime` do diretório.** O do diretório pula quando qualquer entrada nasce, morre ou é renomeada lá dentro, inclusive um `.swp` de editor. Ordenar por ele faria um arquivo temporário reordenar a tela e empurrar o board — e o teste do `.swp` que não empurra nada é exatamente quem prende isso. A de um esforço é o **máximo** entre as issues e o `map.md`/`PRD.md`; um esforço sem documento nenhum vale `0` e afunda, porque não há o que datar e inventar uma data seria o board mentindo.
+- **O carimbo viaja *ao lado* do documento, nunca dentro dele.** `readIssue()` e `readEffort()` devolvem `{ at, issue }` / `{ at, effort }`. Não é estilo: é o que impede o campo de ser serializado por acidente. Ele não precisa ser lembrado e removido na hora de montar o objeto — **ele nunca esteve no objeto**. Um `delete` antes do `JSON.stringify` seria a mesma garantia dependendo de alguém não esquecer.
+- **A estabilidade do `sort` é load-bearing.** As entradas chegam em ordem alfabética (o `.sort()` do `readdir`, o `listSlugs`), então um empate de carimbo cai de volta nela — determinístico. Uma ordem que flutuasse no empate moveria o hash **sem ninguém escrever nada**: um push fantasma, que é o oposto exato do que a supressão comprou.
+- **Ordenar a lista uma vez ordena dentro de cada coluna.** O kanban (`public/effort.js`) desenha a coluna filtrando `effort.issues`, e `filter` **preserva a ordem** — então não há ordenação no cliente, e não deve haver. É por isso que a ordem se afirma **pelo fio**, no `server.test.js`, em vez de por dentro do `board.js`: a ordem do array *é* a ordem da coluna.
+
+**Os arquivados também saem por atividade.** O `mv` do arquivamento preserva o `mtime` dos `.md`, então a lista sai pela atividade que cada esforço teve em vida — o último a ser encerrado no topo. Era alfabética; a mudança veio de graça e informa mais.
+
+### A limitação assumida: na visão geral, a ordem vale *dentro* da seção
+
+**E aqui a frase acima **não** se estende — cuidado, porque ela é convidativa.** A visão geral não desenha `board.efforts` de cima a baixo: o `overview.js` **particiona** os esforços em seções de ordem fixa — **Ativos → Prontos para arquivar → Parados → Arquivados** — e ordena por atividade **dentro de cada uma**.
+
+O efeito é real e está assumido: um esforço recém-chartado (só `PRD.md`, sem issues) é `stalled`, então cai na **terceira** seção. Você acaba de escrever o PRD dele e ele aparece **abaixo** de um esforço ativo intocado há nove dias. Ou seja: *"o esforço quente é o primeiro card da tela"* vale **dentro da seção**, não na tela inteira.
+
+Isto foi uma **escolha**, não um esquecimento. As duas saídas custavam mais do que o problema pede: ordenar as *seções* pela atividade do seu esforço mais quente poria "Parados" no topo, que é semanticamente esquisito; achatar tudo numa grade só jogaria fora uma classificação que alimenta os prompts de skill. Quem quiser resolver isso resolve um problema de **produto**, não de ordenação — e resolve na visão geral, não no `board.js`, que já publica a ordem certa.
+
+**A leitura numérica não se perde**: o número continua em destaque no card, então o `03` que um `Blocked by:` citou continua achável — e a leitura estrutural (as arestas) vive no grafo.
+
 ## Os testes
 
-`node --test test/` — **114 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
+`node --test test/` — **118 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
 
 | Costura | O que trava |
 | --- | --- |
 | `test/doc.test.js` | O parser (`shared/doc.js`, puro): os três dialetos, o `Status:` do corpo que **não** vira estado, o `Blocked by:` com prosa, o `summarize()` pulando o preâmbulo, o status desconhecido virando `?`. |
 | `test/md.test.js` | O renderer (`md.js`, `string → string`): a **ordem das transformações** e o `Blocked by:` que linka sem engolir a justificativa. |
 | `test/graph-layout.test.js` | Os invariantes do grafo (puros): a camada é o **maior** caminho, nenhuma aresta anda para trás, ciclo não estoura, o baricentro, e o guarda que impede o módulo de voltar a tocar o DOM. |
-| `test/server.test.js` | **A costura mais alta.** Servidor de verdade em porta efêmera contra um `.scratch/` temporário, stream SSE lido com o `fetch` nativo, **arquivos escritos de verdade no disco**: o push, o debounce, a supressão, o esforço novo que aparece sem restart, o caminho fora do root recusado, os dois eventos (`message` × `files`), e a **segunda escrita atômica** do mesmo arquivo — o teste que o watcher derrubaria, e o que impede alguém de "simplificar" o digest de volta para a lista de caminhos. |
+| `test/server.test.js` | **A costura mais alta.** Servidor de verdade em porta efêmera contra um `.scratch/` temporário, stream SSE lido com o `fetch` nativo, **arquivos escritos de verdade no disco**: o push, o debounce, a supressão, o esforço novo que aparece sem restart, o caminho fora do root recusado, os dois eventos (`message` × `files`), e a **segunda escrita atômica** do mesmo arquivo — o teste que o watcher derrubaria, e o que impede alguém de "simplificar" o digest de volta para a lista de caminhos. E a **ordem por atividade**: o esforço quente que abre a tela, a coluna do kanban ordenada, o ticket que **não era o primeiro** subindo ao topo num `message`, e os salvamentos seguintes — com ele **já em primeiro** — voltando a ser `files`. O tempo se fabrica com `utimes()`; não há relógio a mockar. |
 | `test/watch.test.js` | O reopen depois do `error`, e um root que ainda não existe. |
 | `test/sweep.test.js` | A varredura de segurança. **Arquivo separado** porque ela precisa de um relógio curto (`sweep: 300`), e um servidor que empurra sozinho a cada 300ms envenenaria as asserções de silêncio do `server.test.js`. (Já foi separado por outro motivo — o hash de módulo do `cache.js` —, e esse motivo acabou.) |
 | `test/namespaces.test.js` | O que **só existe com mais de uma origem**: a descoberta e a ordem, o `ref` nu da de casa contra o qualificado das outras, **dois esforços com o mesmo slug** que não se confundem, o push que carrega o `ns` e **só o board da sua origem**, a supressão que **não atravessa** (escrever o mesmo byte numa não cega a outra), a origem vazia contra a **quebrada**, o erro que passa pelo hash em vez de gritar a cada varredura, e o snapshot de conexão trazendo uma origem por frame. |
