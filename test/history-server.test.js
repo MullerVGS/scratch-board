@@ -195,6 +195,10 @@ test('o catálogo é best-effort: a escrita dele falhando não derruba o board n
   const log = join(histDir, 'history.jsonl')
   await rm(log, { recursive: true, force: true })
   await mkdir(log)
+  // O `histDir` é o único catálogo do arquivo inteiro (vem do `before`, compartilhado por
+  // todo teste seguinte) — sem desfazer a armadilha aqui, qualquer teste somado depois
+  // deste herda um `history.jsonl` que é um diretório, e o `lines()` deles nunca mais lê nada.
+  t.after(() => rm(log, { recursive: true, force: true }))
 
   const s = await boot(t)
 
