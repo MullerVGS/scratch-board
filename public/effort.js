@@ -9,18 +9,22 @@ import { el, esc, copyBtn } from './dom.js'
 import { boardOf } from './state.js'
 import { view, crumbs, tally } from './shell.js'
 import { effortPrompts, promptStrip } from './prompts.js'
-import { cleanTitle, openDeps } from './issues.js'
+import { cleanTitle, openDeps, staleLabel } from './issues.js'
 import { openDrawer, openIssue } from './drawer.js'
 import { renderGraph } from './graph.js'
 
 function issueCard(issue, effort, archived) {
   const title = cleanTitle(issue)
+  // O "há N dias" é conta **daqui** — o servidor manda o dia absoluto em que o ticket parou —,
+  // e o rótulo só sai quando informa. O porquê das duas coisas mora no `staleLabel()`.
+  const stale = staleLabel(issue)
   const card = el(`
     <article class="card ${issue.blocked ? 'is-blocked' : ''}" tabindex="0" role="button">
       <div class="card-title"><b>${esc(issue.number)}</b><span>${esc(title)}</span></div>
       <div class="card-meta">
         <span class="chip" data-s="${esc(issue.status)}">${esc(issue.status)}</span>
         ${issue.type ? `<span class="chip">${esc(issue.type)}</span>` : ''}
+        ${stale ? `<span class="stale-tag" title="última escrita em ${esc(issue.touched)}">${esc(stale)}</span>` : ''}
         ${issue.blocked ? `<span class="blocked-tag">bloqueada por ${esc(openDeps(issue, effort).map((d) => d.number).join(', '))}</span>` : ''}
       </div>
     </article>

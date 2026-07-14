@@ -43,7 +43,7 @@ As decisões que caem daí, e o que cada uma protege:
 
 ```
 docker compose up -d      # http://localhost:7777 (só loopback)
-node --test test/         # 120 testes, zero dependências
+node --test test/         # 134 testes, zero dependências
 ```
 
 `src/`, `shared/` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta. **Mexer nas origens é a exceção**: elas são descobertas no `start()`, então um mount novo pede `docker compose up -d --force-recreate`, não um restart.
@@ -85,7 +85,9 @@ As mudanças no `.scratch/` são raras e vêm de uma vez. 62 KB num evento raro 
 - **Ninguém o lia.** Nenhuma view o usava. (O `ago()` dos pads usa o `mtime` dos *arquivos* de pad, que é outra coisa e permanece.)
 - **Ele sabotaria a supressão.** O `mtime` de um *diretório* pula quando qualquer entrada nasce, morre ou é renomeada dentro dele — inclusive por arquivo temporário que o board nem projeta. No hash, ele moveria o hash sem o board mudar, e a supressão viraria decoração.
 
-Um teste afirma que a string `mtime` não aparece em lugar nenhum do board serializado. **Campo instável no payload mata o push** — vale para qualquer campo novo.
+Um teste afirma que a string `mtime` não aparece em lugar nenhum do board serializado — e que o carimbo **não volta com outro nome** (publicá-lo como `at` mataria a supressão do mesmo jeito). **Campo instável no payload mata o push** — vale para qualquer campo novo.
+
+Instável, note bem, e não *derivado do tempo*: o `touched` da issue (o **dia** em que ela foi tocada) atravessa o fio e não fere nada, porque dez salvamentos no mesmo dia dão o mesmo valor. Ver **"Parado há N dias"**.
 
 ### Dois eventos, e duas supressões independentes
 
@@ -191,7 +193,7 @@ O `shared/` **não** entrou em `src/`, e é deliberado: `src/` é o que só o se
 | `shell.js` | A moldura: `view`, `crumbs`, `tally`, as **abas de origem**, o indicador de conexão e o botão de reler |
 | `state.js` | Os boards na mão do cliente — **um por origem** (`state.boards[ns]`), num **contêiner mutável**, não num `let` exportado (um binding exportado é cópia viva só para quem já importou) |
 | `prompts.js` | `effortPrompts()` / `issuePrompts()` — o comando que destrava cada estado |
-| `issues.js` | **Puro**: `cleanTitle`, `numberIndex`, `depsOf`, `openDeps` |
+| `issues.js` | **Puro**: `cleanTitle`, `numberIndex`, `depsOf`, `openDeps`, `staleLabel`/`STALE_DAYS` |
 | `graph-layout.js` | **Puro**: `layerize()`, `graphLayout()`, `edgePath()`, `NODE_W/H`, `GAP_X/Y`, `PAD` |
 | `graph.js` | O desenho: nós em HTML posicionado, curvas em SVG |
 | `overview.js` | A visão geral e os chips de status |
@@ -389,7 +391,7 @@ A armadilha verdadeira é outra, e é fina. **O `mtime` cru não pode entrar no 
 
 **Mas ordenar por `mtime` não exige publicá-lo.** O servidor ordena e **não emite o campo**: só a *ordem* viaja. O hash se move quando o **ranking** muda — que é quando a tela reordena de verdade, um push legítimo. O agente salva o ticket X, ele sobe ao topo, e os dez salvamentos seguintes **não movem nada**, porque ele já está em primeiro.
 
-E o que precisar de carimbo visível ("parado há 6 dias") entra **quantizado por dia**: dez salvamentos no mesmo dia dão o mesmo valor, o campo não se move, o hash não se move. A precisão que "task velha" pede **é** dia.
+E o que precisa de carimbo visível ("parado há 6 dias") entra **quantizado por dia**: dez salvamentos no mesmo dia dão o mesmo valor, o campo não se move, o hash não se move. A precisão que "task velha" pede **é** dia. Isso está construído — é o `touched` da issue; ver **"Parado há N dias"**.
 
 **A regra que sobra, e essa é absoluta: nada de tempo *relativo* no payload.** O servidor manda ISO absoluto; o `"há 3 dias"` se calcula no navegador. Uma string relativa muda **com o relógio** — a varredura de 90s a recalcularia, o hash se moveria, e o board empurraria sozinho, parado, para sempre. Seria o polling ressuscitado, e pior: barulhento sem ninguém ter escrito nada.
 
@@ -399,7 +401,7 @@ O eixo de tempo vive em `.scratch/scratch-board-eixo-de-tempo/`.
 
 **O esforço onde o agente está escrevendo é o primeiro card da tela, e dentro dele o ticket quente é o primeiro da coluna.** Os esforços saíam em **ordem alfabética** e as issues por nome de arquivo — nenhuma das duas carrega informação, e abrir a visão geral não dizia onde o trabalho estava acontecendo.
 
-A técnica é a da seção acima, e é ela que faz isto ser barato: **para ordenar, publica-se a ordem — não o carimbo.** O `board.js` lê o `mtime`, ordena, e **o carimbo morre ali** (`buildBoard()`, no `.map()` final). O hash se move quando o **ranking** muda, que é quando a tela reordena de verdade.
+A técnica é a da seção acima, e é ela que faz isto ser barato: **para ordenar, publica-se a ordem — não o carimbo.** O `board.js` lê o `mtime`, ordena, e **o carimbo cru morre ali** (`buildBoard()`, no `.map()` final) — o que atravessa o fio é a *ordem*, e mais nada. (O `touched` da issue, que a seção seguinte descreve, é derivado do mesmo `mtime` mas **não é ele**: é o dia, e um dia não se move a cada salvamento.) O hash se move quando o **ranking** muda, que é quando a tela reordena de verdade.
 
 Quatro decisões, e cada uma protege alguma coisa:
 
@@ -436,6 +438,31 @@ O que separa rajada de trabalho não é a **hora**; é a **distância entre elas
 
 A ordem é **função pura do conjunto de `mtime`s**: sem escrita, ela não muda — logo a varredura de 90s não reordena nada sozinha, e o board parado continua parado.
 
+## "Parado há N dias": o card que admite estar encalhado
+
+A ordem põe o trabalho **quente** no topo; este rótulo põe o trabalho **frio** em evidência. Um ticket encalhado há uma semana em `ready-for-agent` era visualmente idêntico a um que entrou na coluna há dez minutos — e o sinal já estava no disco: **ticket parado é, por definição, ticket que ninguém tocou**, então o `mtime` dele *é* a data em que ele entrou no estado atual.
+
+O card mostra `parado há 6 dias`, em âmbar. Âmbar e não vermelho, pela mesma distinção que a gaveta faz com o arquivo que sumiu: **encalhar não é erro, é fato do disco** — e o vermelho já é do `blocked-tag`, que diz outra coisa (ali alguém *segura* o ticket; aqui ninguém o tocou).
+
+**É o único carimbo do board que atravessa o fio**, e as duas regras que o deixam atravessar são as da seção acima, aplicadas:
+
+- **Quantizado por dia** (`touched`, um `2026-07-08`, derivado no `dayOf()` do `src/board.js`). Dez salvamentos hoje dão o mesmo valor: o campo não se move, o hash não se move, e o board não repinta. O `mtime` cru mudaria a cada salvamento. **A quantização não é concessão — é a granularidade certa**: a precisão que "ticket velho" pede *é* dia.
+- **Absoluto.** O `"há 6 dias"` é conta do **navegador** (`staleLabel()`, em `public/issues.js`). Uma string relativa mudaria **com o relógio**: a varredura de 90s a recalcularia, o hash se moveria, e o board empurraria sozinho, parado, para sempre — o polling ressuscitado, e pior, barulhento sem ninguém ter escrito nada.
+
+**O limiar também mora no cliente, e não é um detalhe de onde pôr o `if`.** Se o servidor publicasse o carimbo só acima do corte, um ticket cruzando o limiar **à meia-noite** mudaria o payload sem ninguém ter tocado no disco — e a varredura seguinte empurraria o board inteiro sozinha. O servidor publica o **fato**; quem envelhece é o relógio de quem olha. Consequência aceita: um ticket que cruza o limiar só ganha o rótulo no próximo push ou reload — em vez de um timer no cliente repintando o board para atualizar um número que muda uma vez por dia.
+
+**São 3 dias, e o número é um vale medido na frota** (a mesma doutrina do `BURST_MS`). Dos 79 tickets abertos:
+
+| dias parados | 0 | 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| tickets | 25 | 29 | 16 | **0** | 8 | 1 |
+
+Nada mora no dia 3: as duas populações — trabalho recente e trabalho encalhado — não se tocam, e o corte cai no buraco entre elas. Em `2`, um terço do board sairia rotulado e o rótulo deixaria de informar (dois dias cabem inteiros num fim de semana). O rótulo **só aparece quando informa** — um ticket tocado hoje não diz "parado há 0 dias", e o board não vira um mural de datas irrelevantes.
+
+**Issue fechada nunca recebe o rótulo.** O carimbo viaja em todas elas (numa fechada, o `mtime` é a **resolução** — e é isso que o Gantt vai querer), mas "parado há 30 dias" num ticket `resolved` seria uma data verdadeira contando uma história falsa: ele não encalhou, ele terminou.
+
+**E há uma consequência que não é um bug, e por isso está escrita**: desde que o dia entrou no payload, **conteúdo byte-idêntico pode empurrar o board** — quando o toque atravessa a virada do dia. Um `touch` num ticket parado há cinco dias não muda um byte do arquivo, mas o card **deixa de dizer "parado há 5 dias"**: a tela mudou de verdade, e o `message` é o evento certo. O que a quantização garante é o teto: **uma vez por ticket por dia**, não uma vez por salvamento. A invariante que continua absoluta é a outra — *no ocioso, zero byte* —, porque o carimbo é um fato do disco e não envelhece sozinho. Os dois testes gêmeos do `server.test.js` (tocar **no mesmo dia** cala; tocar um **parado há dias** empurra) existem para que essa fronteira seja uma decisão, e não um acaso que alguém "conserta".
+
 ### A limitação assumida: na visão geral, a ordem vale *dentro* da seção
 
 **E aqui a frase acima **não** se estende — cuidado, porque ela é convidativa.** A visão geral não desenha `board.efforts` de cima a baixo: o `overview.js` **particiona** os esforços em seções de ordem fixa — **Ativos → Prontos para arquivar → Parados → Arquivados** — e ordena por atividade **dentro de cada uma**.
@@ -448,16 +475,17 @@ Isto foi uma **escolha**, não um esquecimento. As duas saídas custavam mais do
 
 ## Os testes
 
-`node --test test/` — **120 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
+`node --test test/` — **134 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
 
 | Costura | O que trava |
 | --- | --- |
 | `test/doc.test.js` | O parser (`shared/doc.js`, puro): os três dialetos, o `Status:` do corpo que **não** vira estado, o `Blocked by:` com prosa, o `summarize()` pulando o preâmbulo, o status desconhecido virando `?`. |
 | `test/md.test.js` | O renderer (`md.js`, `string → string`): a **ordem das transformações** e o `Blocked by:` que linka sem engolir a justificativa. |
-| `test/graph-layout.test.js` | Os invariantes do grafo (puros): a camada é o **maior** caminho, nenhuma aresta anda para trás, ciclo não estoura, o baricentro, e o guarda que impede o módulo de voltar a tocar o DOM. |
-| `test/server.test.js` | **A costura mais alta.** Servidor de verdade em porta efêmera contra um `.scratch/` temporário, stream SSE lido com o `fetch` nativo, **arquivos escritos de verdade no disco**: o push, o debounce, a supressão, o esforço novo que aparece sem restart, o caminho fora do root recusado, os dois eventos (`message` × `files`), e a **segunda escrita atômica** do mesmo arquivo — o teste que o watcher derrubaria, e o que impede alguém de "simplificar" o digest de volta para a lista de caminhos. E a **ordem por atividade**: o esforço quente que abre a tela, a coluna do kanban ordenada, o ticket que **não era o primeiro** subindo ao topo num `message`, e os salvamentos seguintes — com ele **já em primeiro** — voltando a ser `files`. O tempo se fabrica com `utimes()`; não há relógio a mockar. |
+| `test/graph-layout.test.js` | Os invariantes do grafo (puros): a camada é o **maior** caminho, nenhuma aresta anda para trás, ciclo não estoura, o baricentro, e o guarda que impede o módulo (e o `issues.js`) de voltar a tocar o DOM. |
+| `test/issues.test.js` | O vocabulário puro do cliente: o rótulo **"parado há N dias"** — o limiar de 3 dias, o ticket recém-tocado que **cala**, o fechado que nunca está "parado" (está pronto), a ausência de carimbo que não vira data inventada, e a conta de dias inteiros que não escorrega com a hora. O "agora" entra por parâmetro; não há relógio a mockar. |
+| `test/server.test.js` | **A costura mais alta.** Servidor de verdade em porta efêmera contra um `.scratch/` temporário, stream SSE lido com o `fetch` nativo, **arquivos escritos de verdade no disco**: o push, o debounce, a supressão, o esforço novo que aparece sem restart, o caminho fora do root recusado, os dois eventos (`message` × `files`), e a **segunda escrita atômica** do mesmo arquivo — o teste que o watcher derrubaria, e o que impede alguém de "simplificar" o digest de volta para a lista de caminhos. E a **ordem por atividade**: o esforço quente que abre a tela, a coluna do kanban ordenada, o ticket que **não era o primeiro** subindo ao topo num `message`, e os salvamentos seguintes — com ele **já em primeiro** — voltando a ser `files`. E o **carimbo de parada**: o dia absoluto que o encalhado carrega (nenhuma string relativa viaja), e os salvamentos do mesmo dia que **não movem o hash**. O tempo se fabrica com `utimes()`; não há relógio a mockar. |
 | `test/watch.test.js` | O reopen depois do `error`, e um root que ainda não existe. |
-| `test/sweep.test.js` | A varredura de segurança. **Arquivo separado** porque ela precisa de um relógio curto (`sweep: 300`), e um servidor que empurra sozinho a cada 300ms envenenaria as asserções de silêncio do `server.test.js`. (Já foi separado por outro motivo — o hash de módulo do `cache.js` —, e esse motivo acabou.) |
+| `test/sweep.test.js` | A varredura de segurança. **Arquivo separado** porque ela precisa de um relógio curto (`sweep: 300`), e um servidor que empurra sozinho a cada 300ms envenenaria as asserções de silêncio do `server.test.js`. (Já foi separado por outro motivo — o hash de módulo do `cache.js` —, e esse motivo acabou.) É aqui também que vive o guarda do eixo de tempo: um board com um ticket **encalhado há seis dias**, atravessado por várias varreduras, continua **mudo** — é este teste que um `"há N dias"` calculado no servidor derrubaria. |
 | `test/namespaces.test.js` | O que **só existe com mais de uma origem**: a descoberta e a ordem, o `ref` nu da de casa contra o qualificado das outras, **dois esforços com o mesmo slug** que não se confundem, o push que carrega o `ns` e **só o board da sua origem**, a supressão que **não atravessa** (escrever o mesmo byte numa não cega a outra), a origem vazia contra a **quebrada**, o erro que passa pelo hash em vez de gritar a cada varredura, e o snapshot de conexão trazendo uma origem por frame. |
 | `test/drawer.test.js` | O que a gaveta **assume sobre o mundo**: que o `changed` fala o mesmo vocabulário de caminho que o board, que a string do 404 é a que ela procura, e que o esforço publica `ns` e `path` — os dois campos com que ela acha o board certo. |
 | `test/pads.test.js` | A **poda** dos scratchpads: o `node_modules` do topo e o **aninhado**, as contagens, os bytes e a **recência** que ele não pode sequestrar, o vizinho recursivo que sobrevive com o `ref` absoluto real, a sessão que só deixou dependência e por isso some, e o arquivo *chamado* `node_modules` que **é conteúdo** — o teste que separa a poda na travessia de um filtro por nome depois dela. |

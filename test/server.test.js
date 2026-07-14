@@ -241,7 +241,11 @@ test('reescrever um arquivo com o mesmo conteúdo NÃO empurra nada', async () =
   }
 })
 
-test('tocar um arquivo (mtime novo, conteúdo igual) NÃO empurra nada', async () => {
+test('tocar um arquivo NO MESMO DIA (mtime novo, conteúdo igual) NÃO empurra nada', async () => {
+  // **"No mesmo dia" é a fronteira, e ela é a do carimbo de parada** (ver "O carimbo de
+  // parada", abaixo): o board projeta o **dia** em que a issue foi tocada, então um toque que
+  // não muda o dia não muda a projeção — e o hash não se move. Um toque que **muda** o dia
+  // muda o que o card diz, e aí ele empurra, com razão: é o teste seguinte.
   const stream = await openStream()
   try {
     const now = new Date()
@@ -589,6 +593,103 @@ test('mas trabalhar num ticket o traz ao topo NO MESMO DIA — tempo continua se
     e.issues.slice(1).map((i) => i.file),
     ['01-t.md', '03-t.md', '04-t.md', '05-t.md'],
   )
+})
+
+// ## O carimbo de parada — "parado há N dias"
+//
+// A ordem, acima, não carrega carimbo nenhum. Este carrega — e é a única coisa do board que
+// carrega —, então as duas regras que o protegem viram teste aqui:
+//
+//   - **absoluto**, nunca relativo: o servidor manda o **dia**, e o `"há 6 dias"` é conta do
+//     navegador. Uma string relativa mudaria **com o relógio**, e a varredura de 90s a
+//     recalcularia — o board empurrando sozinho, parado, para sempre;
+//   - **quantizado por dia**: dez salvamentos hoje dão o mesmo valor, o campo não se move e o
+//     hash não se move. É o `mtime` cru que mataria a supressão, não a data dele.
+
+/** O dia (UTC) de `d` dias atrás, no formato que o payload publica. */
+const dayAgo = (d) => new Date(Date.now() - d * 864e5).toISOString().slice(0, 10)
+
+test('o ticket encalhado carrega o DIA em que parou — absoluto, e o `mtime` cru continua fora', async () => {
+  await put('encalhado/issues/01-frio.md', issue('01 — Frio', 'ready-for-agent'))
+  await age('encalhado/issues/01-frio.md', 6)
+
+  const b = await board()
+  const frio = effortOf(b, 'encalhado').issues[0]
+
+  // Uma data, e só a data: `2026-07-08`. O `mtime` cru (`1752...`) publicaria a hora e o
+  // milissegundo — e cada salvamento do agente moveria o hash.
+  assert.match(frio.touched, /^\d{4}-\d{2}-\d{2}$/, 'o carimbo tem que ser um dia, não um instante')
+  assert.equal(frio.touched, dayAgo(6))
+
+  // **Nada de tempo relativo no fio.** O quanto isso é "há N dias" é conta do navegador contra
+  // o relógio dele; o que viaja é o fato, que não envelhece.
+  const serializado = JSON.stringify(effortOf(b, 'encalhado').issues)
+  for (const relativo of ['há ', 'atrás', 'parado h']) {
+    assert.equal(serializado.includes(relativo), false, `\`${relativo}\` não pode viajar no payload`)
+  }
+
+  // E o guarda de sempre continua de pé: o carimbo que **ordena** não viaja de jeito nenhum.
+  assert.equal('at' in frio, false)
+  assert.equal('mtime' in frio, false)
+})
+
+test('o ticket recém-tocado carrega o dia de HOJE — quem cala o rótulo é o navegador', async () => {
+  // O servidor não decide se o rótulo aparece: ele publica o fato, sempre, e o limiar (3 dias,
+  // em `public/issues.js`) mora no cliente. Se o corte morasse aqui, um ticket cruzando o
+  // limiar **à meia-noite** moveria o hash sem ninguém ter escrito nada — a varredura seguinte
+  // empurraria o board inteiro sozinha. O carimbo absoluto só se move quando o disco se move.
+  const b = await board()
+  const quente = effortOf(b, 'alpha').issues.find((i) => i.file === '01-um.md')
+  assert.equal(quente.touched, dayAgo(0))
+})
+
+test('dois salvamentos do mesmo arquivo no mesmo dia não movem o hash — a quantização', async () => {
+  await put('carimbo/issues/01-a.md', issue('01 — A', 'ready-for-agent'))
+  await board() // absorve o nascimento: daqui em diante o `carimbo` é o esforço mais quente
+
+  const stream = await openStream()
+  try {
+    // Só o corpo muda, e o ticket **já é o primeiro** — nem a projeção nem o ranking se mexem.
+    // A única coisa que se move é o `mtime`, e é dele que o `touched` é derivado: publicá-lo
+    // cru faria cada um destes salvamentos arrastar o board inteiro (~71 KB) e um re-render.
+    for (const n of [1, 2, 3]) {
+      await put('carimbo/issues/01-a.md', `Status: ready-for-agent\nType: task\n\n# 01 — A\n\nParágrafo ${n}.\n`)
+
+      const ev = await stream.next()
+      assert.equal(ev.event, 'files', `o salvamento ${n} repintou o board — o carimbo não está quantizado`)
+      assert.equal('board' in ev, false)
+    }
+  } finally {
+    stream.close()
+  }
+})
+
+test('mas tocar um arquivo PARADO HÁ DIAS empurra — o card dizia uma coisa e passa a dizer outra', async () => {
+  // O contraponto do "tocar no mesmo dia não empurra nada", lá em cima — e ele existe para que
+  // a fronteira entre os dois seja uma **decisão**, e não um acaso que alguém "conserta".
+  //
+  // Aquele teste passava por sorte antes deste ticket: sem carimbo no payload, **nenhum** toque
+  // empurrava. Agora o dia viaja, e a pergunta "conteúdo byte-idêntico pode empurrar o board?"
+  // tem uma resposta que precisa estar escrita: **pode, quando o dia vira.** O ticket dizia
+  // "parado há 5 dias" e passa a não dizer nada — a tela mudou de verdade, e o `message` é o
+  // evento certo. O que a quantização garante é o **teto**: uma vez por ticket por dia, e não
+  // uma vez por salvamento. O ocioso continua em zero byte, porque o carimbo é um fato do
+  // disco e não envelhece sozinho — quem prende isso é o `sweep.test.js`.
+  await put('toque/issues/01-a.md', issue('01 — A', 'ready-for-agent'))
+  await age('toque/issues/01-a.md', 5)
+  await board() // absorve o nascimento
+
+  const stream = await openStream()
+  try {
+    const agora = new Date()
+    await utimes(join(root, 'toque/issues/01-a.md'), agora, agora)
+
+    const ev = await stream.next()
+    assert.equal(ev.event, 'message', 'o dia virou: o card deixou de dizer "parado há 5 dias"')
+    assert.equal(effortOf(ev.board, 'toque').issues[0].touched, dayAgo(0))
+  } finally {
+    stream.close()
+  }
 })
 
 /**

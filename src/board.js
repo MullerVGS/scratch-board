@@ -13,9 +13,10 @@
 // resultado e decide se ele mudou é o `cache.js`; separar as duas coisas é o que faz a
 // supressão do push ser demonstrável em vez de prometida.
 //
-// **O `mtime` é lido aqui, e não sai daqui.** Ele ordena — os esforços e, dentro de cada um,
-// as issues, de modo que o trabalho quente suba — mas **nenhum carimbo de filesystem entra no
-// payload**, e a distinção é a decisão central deste módulo:
+// **O `mtime` cru é lido aqui, e não sai daqui.** Ele ordena — os esforços e, dentro de cada
+// um, as issues, de modo que o trabalho quente suba —, e dele se deriva o **dia** em que cada
+// issue foi tocada (`touched`, no `dayOf()` abaixo). O que **nunca** atravessa o fio é o
+// carimbo bruto, e a distinção é a decisão central deste módulo:
 //
 // (A ordem que sai daqui é a certa. O que a *tela* faz com ela é outra história: o kanban a
 // respeita, e a visão geral a quebra em seções — limitação assumida, escrita no `AGENTS.md`.)
@@ -29,11 +30,15 @@
 //   quando a tela reordena de verdade, um push legítimo. O agente salva o ticket X: ele sobe
 //   ao topo (um push), e os dez salvamentos seguintes não movem nada, porque ele já está em
 //   primeiro.
+// - **E publicar o *dia* também não**, pelo mesmo motivo com outra roupa: dez salvamentos de
+//   hoje dão o mesmo dia. O campo só se move quando o ticket atravessa a meia-noite e alguém
+//   o toca — um push por ticket por dia, no máximo, e a tela de fato mudou.
 //
 // Daí a forma das leituras abaixo: elas devolvem **`{ at, ... }`** — o carimbo *ao lado* do
 // documento, nunca dentro dele. A garantia deixa de ser uma regra que alguém precisa lembrar
 // de respeitar na hora de montar o objeto, e passa a ser a forma da função: o `at` não tem
-// como ser serializado por acidente, porque ele nunca esteve no que se serializa.
+// como ser serializado por acidente, porque ele nunca esteve no que se serializa. O que entra
+// no objeto é o que se **decidiu** publicar, e só isso.
 //
 // **E a atividade é a dos arquivos que o board projeta — nunca a do diretório.** O `mtime` de
 // um *diretório* pula quando qualquer entrada nasce, morre ou é renomeada lá dentro,
@@ -138,6 +143,32 @@ async function readStamped(path) {
   return { raw, at: mtimeMs }
 }
 
+/**
+ * O **dia** em que o documento foi tocado, e é este o único carimbo que atravessa o fio.
+ *
+ * Ele existe para o `"parado há N dias"` do card, e as duas metades do nome são a defesa:
+ *
+ * - **Dia**, e não instante. O `mtime` cru muda a *cada* salvamento do agente — publicá-lo
+ *   moveria o hash toda vez e o evento viraria `message` (~71 KB + re-render) em vez do
+ *   `files` (~126 bytes), colapsando as duas supressões. Quantizado, dez salvamentos de hoje
+ *   dão o mesmo valor: o campo não se move, o hash não se move. **A quantização não é uma
+ *   concessão — é a granularidade certa**: a precisão que "ticket velho" pede *é* dia.
+ * - **Absoluto**, e não relativo. O `"há 6 dias"` é conta do navegador (`public/issues.js`).
+ *   Uma string relativa mudaria **com o relógio**: a varredura de 90s a recalcularia, o hash
+ *   se moveria, e o board empurraria sozinho, parado, para sempre — o polling ressuscitado, e
+ *   pior, barulhento sem ninguém ter escrito nada.
+ *
+ * E o **limiar** — a partir de quantos dias o rótulo aparece — mora no cliente pela mesma
+ * razão: se o corte fosse aqui, um ticket cruzando os três dias **à meia-noite** mudaria o
+ * payload sem ninguém ter tocado no disco, e a varredura seguinte empurraria o board inteiro.
+ * O servidor publica o fato; quem envelhece é o relógio de quem olha.
+ *
+ * Ele viaja em **todas** as issues, inclusive nas fechadas — nelas o `mtime` é a resolução, e
+ * é um fato como qualquer outro. Quem decide que uma issue fechada não está "parada" é o
+ * rótulo, no cliente.
+ */
+const dayOf = (at) => new Date(at).toISOString().slice(0, 10)
+
 async function readIssue(ns, effortSlug, dir, file) {
   const path = join(dir, file)
   const { raw, at } = await readStamped(path)
@@ -150,6 +181,7 @@ async function readIssue(ns, effortSlug, dir, file) {
       path,
       ref: refIn(ns, path),
       id: `${effortSlug}/${file}`,
+      touched: dayOf(at),
       number: /^(\d+)/.exec(file)?.[1] ?? '',
       title: title ?? file.replace(/\.md$/, ''),
       status,

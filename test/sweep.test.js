@@ -22,7 +22,7 @@
  */
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -106,6 +106,13 @@ before(async () => {
   await put('alpha/map.md', '# Mapa do alpha\n\nO primeiro parágrafo.\n')
   await put('alpha/issues/01-um.md', issue('01 — Um', 'ready-for-agent'))
 
+  // Um ticket **encalhado há seis dias**, que é o board que este arquivo precisa ter para
+  // dizer algo sobre o eixo de tempo: é o único cujo card carrega um carimbo, e é ele que a
+  // varredura poderia repintar sozinha se o carimbo envelhecesse com o relógio.
+  await put('encalhado/issues/01-frio.md', issue('01 — Frio', 'ready-for-agent'))
+  const seisDias = new Date(Date.now() - 6 * 864e5)
+  await utimes(join(root, 'encalhado/issues/01-frio.md'), seisDias, seisDias)
+
   const mod = await import('../src/server.js')
   server = await mod.start(0, { sweep: SWEEP })
   base = `http://127.0.0.1:${server.port}`
@@ -123,6 +130,24 @@ test('num board parado, a varredura roda e NÃO emite nada', async () => {
     // Várias voltas inteiras da varredura. Ela reconstrói o board a cada uma — e o hash
     // não se move, então o fio fica mudo. É isto que a faz custar quase nada: 40 leituras
     // por hora, zero re-render. Se ela empurrasse "por via das dúvidas", seria o polling.
+    await stream.silence(SWEEP * 4)
+  } finally {
+    stream.close()
+  }
+})
+
+test('e o board com um ticket ENCALHADO continua mudo — o carimbo não envelhece sozinho', async () => {
+  // O modo de falha que o eixo de tempo poderia introduzir, e a razão de ele existir aqui: um
+  // `"parado há 6 dias"` **calculado no servidor** é uma string que muda com o relógio. Ela
+  // sobreviveria a esta varredura, mas não à seguinte — e o board empurraria 71 KB e um
+  // re-render **sozinho, parado**, sem ninguém ter escrito um byte. Seria o polling ressuscitado,
+  // e pior: barulhento. O que viaja é o dia em que o ticket parou, que não envelhece.
+  const stream = await openStream()
+  try {
+    const { boards } = await (await fetch(`${base}/api/board`)).json()
+    const frio = effortOf(boards.projetos, 'encalhado').issues[0]
+    assert.match(frio.touched, /^\d{4}-\d{2}-\d{2}$/, 'o card do encalhado tem que carregar o dia')
+
     await stream.silence(SWEEP * 4)
   } finally {
     stream.close()

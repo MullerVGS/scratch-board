@@ -154,7 +154,20 @@
   margin-left: auto;
 }
 
-.blocked-tag {
+/**
+ * As duas notas do card. Mesma forma, e só a cor as separa — porque só a cor as **distingue**:
+ * o vermelho diz que alguém *segura* o ticket; o âmbar, que ninguém o tocou. Encalhar não é um
+ * erro, é um fato do disco — a mesma distinção que a gaveta faz com o arquivo que sumiu.
+ */
+.blocked-tag,
+.stale-tag {
   font-size: 11px;
+}
+
+.blocked-tag {
   color: var(--red);
+}
+
+.stale-tag {
+  color: var(--amber);
 }
