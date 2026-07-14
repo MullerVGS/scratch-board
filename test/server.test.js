@@ -541,14 +541,17 @@ test('tickets nascidos na mesma rajada saem em ordem numérica — rajada não �
   //
   // Daí a regra: **abaixo do dia, o carimbo de um ticket é ruído; o `NN` é informação** — ele
   // é a espinha do `Blocked by:`. O dia manda, e dentro do dia manda o número.
-  // A rajada de verdade leva **segundos** entre um ticket e o outro (o agente compõe cada um),
-  // e é isso que dá ao `07` o carimbo mais novo. Escrever os cinco num loop cairia no mesmo
-  // milissegundo, empataria, e o teste passaria sem provar nada — daí o `utimes` escalonando.
-  const agora = Date.now()
+  // A rajada de verdade leva **~20s** entre um ticket e o outro — medido na frota: os gaps de
+  // criação vão de 4s a 25s, enquanto o menor gap entre dois trabalhos reais é de 389s. É esse
+  // vale que separa as duas coisas.
+  //
+  // Escrever os cinco num loop cairia no mesmo milissegundo, empataria, e o teste passaria sem
+  // provar nada — daí o `utimes` escalonando de verdade.
+  const rajada = Date.now() - 3_600_000 // uma hora atrás, e ainda hoje
   for (const n of [1, 2, 3, 4, 5]) {
     const file = `rajada-nn/issues/0${n}-t.md`
     await put(file, issue(`0${n} — T`, 'ready-for-agent'))
-    const nasceu = new Date(agora - (6 - n) * 20_000) // 20s entre cada, e o 05 é o mais novo
+    const nasceu = new Date(rajada + n * 20_000) // 20s entre cada: o 05 é o mais novo
     await utimes(join(root, file), nasceu, nasceu)
   }
 
@@ -556,7 +559,35 @@ test('tickets nascidos na mesma rajada saem em ordem numérica — rajada não �
   assert.deepEqual(
     e.issues.map((i) => i.file),
     ['01-t.md', '02-t.md', '03-t.md', '04-t.md', '05-t.md'],
-    'a rajada de criação não carrega informação: quem manda dentro do dia é o número',
+    'a rajada de criação não carrega informação: dentro dela, quem manda é o número',
+  )
+})
+
+test('mas trabalhar num ticket o traz ao topo NO MESMO DIA — tempo continua sendo o critério', async () => {
+  // O contraponto do teste acima, e é ele que impede a "correção" preguiçosa: quantizar o
+  // carimbo por **dia** também colapsaria a rajada — e mataria isto, que é o ponto do board.
+  //
+  // A rajada do teste acima nasceu **uma hora atrás — hoje**. Agora o agente toca o `02`. Ele
+  // **tem** que abrir a coluna: é a resposta à pergunta que originou o esforço inteiro —
+  // *"qual issue está sendo trabalhada agora?"*.
+  //
+  // Uma hora de distância, mas o **mesmo dia**: é exatamente isto que uma quantização por dia
+  // apagaria. O critério é tempo; a rajada é a exceção, não a regra.
+  //
+  // E o ticket é reescrito com **o mesmo conteúdo** de propósito: nada nele muda, nem status
+  // nem coluna. A única coisa que se move é o carimbo — e é só ele que o traz ao topo.
+  await put('rajada-nn/issues/02-t.md', issue('02 — T', 'ready-for-agent'))
+
+  const e = effortOf(await board(), 'rajada-nn')
+  assert.equal(
+    e.issues[0].file,
+    '02-t.md',
+    'o ticket tocado tem que subir ao topo mesmo estando no mesmo dia da rajada',
+  )
+  // E os outros, que continuam intocados, seguem na ordem numérica da rajada.
+  assert.deepEqual(
+    e.issues.slice(1).map((i) => i.file),
+    ['01-t.md', '03-t.md', '04-t.md', '05-t.md'],
   )
 })
 

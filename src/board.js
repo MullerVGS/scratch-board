@@ -65,42 +65,65 @@ import { refIn } from './paths.js'
  */
 const byActivity = (a, b) => b.at - a.at
 
-const DAY = 86_400_000
-const dayOf = (at) => Math.floor(at / DAY)
+/**
+ * Duas escritas separadas por menos disto são **a mesma rajada**, não duas atividades.
+ *
+ * Medido na frota, e os dois grupos não se tocam:
+ *
+ * | | intervalo entre escritas |
+ * | --- | --- |
+ * | rajada de criação (`/to-tickets` compondo `01…07`) | **4s – 25s** |
+ * | trabalho de verdade (reivindicar, resolver, tocar) | **≥ 389s** (~6,5 min) |
+ *
+ * 60s cai no meio desse vale: 2,4× acima do maior gap de rajada, 6,5× abaixo do menor gap de
+ * trabalho. Não é um número escolhido no gosto — é o meio de uma separação que existe no disco.
+ */
+const BURST_MS = 60_000
 
-/** Um arquivo sem `NN` não pertence à espinha numerada e vai para o fim do seu dia. */
+/** Um arquivo sem `NN` não pertence à espinha numerada e vai para o fim da sua rajada. */
 const numberOf = (issue) =>
   issue.number === '' ? Number.MAX_SAFE_INTEGER : Number(issue.number)
 
 /**
- * As **issues** ordenam por outro critério, e a diferença é de domínio, não de gosto:
- * **o dia manda, e dentro do dia manda o número.**
+ * A ordem das **issues**: por tempo, mais recente primeiro — **exceto dentro de uma rajada, onde
+ * manda o número.**
  *
- * O `/to-tickets` escreve `01…07` numa rajada só, com segundos entre um e outro. Pelo `mtime`
- * cru, o `07` é o mais recente e a coluna sai **invertida** — a frontier (`01`) no fim, que é o
- * pior lugar possível para ela. E não se conserta sozinho: um ticket em `ready-for-agent` é, por
- * definição, um que **ninguém tocou** desde que nasceu (tocá-lo muda o `Status:`, e isso o tira
- * da coluna). A inversão seria permanente, e permanente justamente na coluna de onde se escolhe
- * o trabalho.
+ * O problema que isto resolve: o `/to-tickets` escreve `01…07` de uma vez, com ~20s entre um e
+ * outro. Pelo `mtime` puro, o `07` é o mais recente e a coluna sai **invertida** — a frontier
+ * (`01`) no fim, que é o pior lugar possível para ela. E **não se conserta sozinho**: um ticket
+ * em `ready-for-agent` é, por definição, um que ninguém tocou desde que nasceu (tocá-lo muda o
+ * `Status:`, e isso o **tira da coluna**). A inversão seria permanente, e permanente justamente
+ * na coluna de onde se escolhe o trabalho.
  *
- * Então: **abaixo do dia, o carimbo de um ticket é ruído — e o `NN` é informação.** Ele é a
- * espinha que o `Blocked by:` referencia. Quantizar o dia joga o ruído fora e deixa o sinal.
+ * **Por que agrupar por lacuna, e não quantizar o carimbo.** Um balde de tempo absoluto
+ * (`Math.floor(at / N)`) *parece* a solução óbvia e não funciona: uma rajada de sete tickets a
+ * 20s **abrange 95–140 segundos**, então ela atravessa dois ou três baldes de minuto e o corte a
+ * parte no meio — sairia `06,07 → 04,05 → 01,02,03`, pior que a inversão limpa. Balde tem borda,
+ * e a rajada cai em cima dela. Já um balde grande o bastante para conter a rajada inteira (um
+ * dia) apaga o que o board existe para mostrar: o ticket tocado às 15h deixaria de subir sobre a
+ * rajada das 9h **do mesmo dia**.
  *
- * O que se perde é pouco e o que se ganha é muito: dentro do mesmo dia, o ticket "mais quente"
- * não sobe na sua coluna. Mas trabalhar num ticket **muda o status dele**, o que já o move de
- * coluna — a pergunta "qual estou trabalhando agora?" é respondida pela coluna `claimed`, não
- * pela ordem dentro dela.
+ * O que separa rajada de trabalho não é a **hora**; é a **distância entre elas**. Então é isso
+ * que se mede.
  *
- * **E os esforços continuam no `mtime` cru** (`byActivity`, acima): cortar o dia lá faria dois
- * esforços tocados hoje empatarem, e a tela deixaria de responder *"qual esforço está quente
- * agora?"* — a pergunta nº 1 do PRD. Um esforço não tem `NN` para desempatar; um ticket tem.
- * É essa assimetria, e só ela, que justifica os dois critérios.
- *
- * (O dia sai do `mtime` do **arquivo**, nunca de `Date.now()` — ele não muda com o relógio, e
- * por isso a varredura de 90s não pode reordenar nada sozinha.)
+ * A ordem é função pura do conjunto de `mtime`s: sem escrita, ela não muda — logo a varredura de
+ * 90s não reordena nada sozinha, e o board parado continua parado.
  */
-const byDayThenNumber = (a, b) =>
-  dayOf(b.at) - dayOf(a.at) || numberOf(a.issue) - numberOf(b.issue)
+function orderIssues(stamped) {
+  const byTime = [...stamped].sort(byActivity)
+  const out = []
+
+  for (let i = 0; i < byTime.length; ) {
+    // A rajada se estende enquanto o vizinho seguinte estiver a menos de `BURST_MS` do anterior.
+    // É encadeado de propósito: os gaps são de ~20s, mas o vão inteiro passa de dois minutos.
+    let j = i + 1
+    while (j < byTime.length && byTime[j - 1].at - byTime[j].at < BURST_MS) j++
+
+    out.push(...byTime.slice(i, j).sort((a, b) => numberOf(a.issue) - numberOf(b.issue)))
+    i = j
+  }
+  return out
+}
 
 /**
  * Um documento e **quando ele foi tocado**, numa ida só ao disco. É a única forma de ler
@@ -148,12 +171,11 @@ export async function readEffort(ns, root, slug) {
     files = (await readdir(issuesDir)).filter((f) => extname(f) === '.md').sort()
   } catch { /* esforço sem issues/ — só PRD, é válido */ }
 
-  // As issues saem pelo **dia de atividade e, dentro do dia, pelo número** — ver
-  // `byDayThenNumber`. A ordem do array *é* a ordem da tela: o kanban (`public/effort.js`)
-  // filtra por coluna, e `filter` preserva a ordem — então ordenar a lista uma vez, aqui,
-  // ordena **dentro de cada coluna**, que é onde o olho procura.
-  const stamped = (await Promise.all(files.map((f) => readIssue(ns, slug, issuesDir, f))))
-    .sort(byDayThenNumber)
+  // As issues saem **por tempo, com a rajada de criação desfeita pelo número** — ver
+  // `orderIssues`. A ordem do array *é* a ordem da tela: o kanban (`public/effort.js`) filtra
+  // por coluna, e `filter` preserva a ordem — então ordenar a lista uma vez, aqui, ordena
+  // **dentro de cada coluna**, que é onde o olho procura.
+  const stamped = orderIssues(await Promise.all(files.map((f) => readIssue(ns, slug, issuesDir, f))))
   const issues = stamped.map((s) => s.issue)
 
   // Um item está bloqueado se qualquer issue que ele lista ainda não fechou. Uma
