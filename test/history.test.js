@@ -165,9 +165,7 @@ test('arquivo `alive` com data inválida é descartado silenciosamente, não lan
 
   // Uma transição agora não deve lançar `RangeError`. Como `alive` é `null`,
   // a janela `after` da transição deve ser `null` (não sabemos desde quando).
-  assert.doesNotThrow(() => {
-    second.observe('projetos', [effort('eixo', ['01', 'claimed'])], 5000)
-  })
+  await assert.doesNotReject(() => second.observe('projetos', [effort('eixo', ['01', 'claimed'])], 5000))
 
   // Verifica que a transição foi registrada com a janela correta.
   const [, move] = await lines(dir)
