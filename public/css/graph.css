@@ -48,12 +48,6 @@
   position: relative;
 }
 
-.graph-note {
-  margin: 0 0 12px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
 /* As arestas ficam atrás dos nós e não capturam clique — exceto o próprio traço, que
    precisa do hover para entregar a justificativa do bloqueio. */
 .graph-edges {

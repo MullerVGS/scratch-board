@@ -1,9 +1,9 @@
 /**
- * A página de um esforço: a barra de documentos, os prompts, e as duas visões —
- * o kanban e o grafo.
+ * A página de um esforço: a barra de documentos, os prompts, e as três visões —
+ * o kanban, o grafo e o Gantt.
  *
  * A visão escolhida vive no **hash**, não em `localStorage`: é onde já vive o resto da
- * navegação, e assim o grafo de um esforço vira um link colável.
+ * navegação, e assim o grafo (ou o Gantt) de um esforço vira um link colável.
  */
 import { el, esc, copyBtn } from './dom.js'
 import { boardOf } from './state.js'
@@ -12,6 +12,7 @@ import { effortPrompts, promptStrip } from './prompts.js'
 import { cleanTitle, openDeps, staleLabel } from './issues.js'
 import { openDrawer, openIssue } from './drawer.js'
 import { renderGraph } from './graph.js'
+import { renderGantt } from './gantt.js'
 
 function issueCard(issue, effort, archived) {
   const title = cleanTitle(issue)
@@ -42,7 +43,9 @@ function issueCard(issue, effort, archived) {
   return card
 }
 
-export function renderEffort(ns, slug, archived, graph = false) {
+// `mode` é o segmento do hash depois do slug: `grafo`, `gantt`, ou nada — e qualquer coisa
+// que não seja uma visão conhecida cai na lista, como um hash velho caía.
+export function renderEffort(ns, slug, archived, mode) {
   const board = boardOf(ns)
   const pool = archived ? board.archived : board.efforts
   const effort = pool.find((e) => e.slug === slug)
@@ -95,21 +98,26 @@ export function renderEffort(ns, slug, archived, graph = false) {
   if (strip) parts.push(strip)
 
   // A visão escolhida vive no hash, não em `localStorage`: é onde já vive o resto da
-  // navegação, e um link para o grafo de um esforço passa a ser colável.
+  // navegação, e um link para o grafo ou o Gantt de um esforço passa a ser colável.
   const base = `#/${ns}/${archived ? 'archive/' : ''}${slug}`
-  const swap = el(`
-    <div class="viewswitch" role="tablist">
-      <button role="tab" class="${graph ? '' : 'on'}" aria-selected="${!graph}">lista</button>
-      <button role="tab" class="${graph ? 'on' : ''}" aria-selected="${graph}">grafo</button>
-    </div>
-  `)
-  const [listBtn, graphBtn] = swap.querySelectorAll('button')
-  listBtn.onclick = () => (location.hash = base)
-  graphBtn.onclick = () => (location.hash = `${base}/grafo`)
+  const views = [
+    ['lista', base],
+    ['grafo', `${base}/grafo`],
+    ['gantt', `${base}/gantt`],
+  ]
+  const on = views.some(([name]) => name === mode) ? mode : 'lista'
+  const swap = el('<div class="viewswitch" role="tablist"></div>')
+  for (const [name, hash] of views) {
+    const b = el(`<button role="tab" class="${on === name ? 'on' : ''}" aria-selected="${on === name}">${name}</button>`)
+    b.onclick = () => (location.hash = hash)
+    swap.append(b)
+  }
   parts.push(swap)
 
-  if (graph) {
+  if (on === 'grafo') {
     parts.push(renderGraph(effort, archived))
+  } else if (on === 'gantt') {
+    parts.push(renderGantt(effort, archived))
   } else {
     const boardEl = el('<div class="board"></div>')
     for (const col of board.columns) {

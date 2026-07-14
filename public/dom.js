@@ -31,6 +31,22 @@ export const svg = (tag, attrs) => {
   return node
 }
 
+/**
+ * Faz um nó "apertável": clique, Enter e espaço disparam a mesma ação. É o contrato dos
+ * cards, dos nós do grafo e das barras do Gantt — tudo que tem `role="button"` sem ser um
+ * `<button>` precisa dos três, ou o teclado fica de fora.
+ */
+export function pressable(node, fn) {
+  node.onclick = fn
+  node.onkeydown = (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault()
+      fn()
+    }
+  }
+  return node
+}
+
 export const esc = (s) =>
   String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 

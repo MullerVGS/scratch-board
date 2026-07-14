@@ -748,3 +748,50 @@ test('e os salvamentos seguintes — com ele já em primeiro — não movem o bo
     stream.close()
   }
 })
+
+// ---------------------------------------------------------------------------
+// O `created` do Gantt: um piso por dia, e ele viaja marcado como piso
+// ---------------------------------------------------------------------------
+//
+// A borda esquerda de uma barra do Gantt é o `created` — e, enquanto o catálogo não existe,
+// ele é um **piso**: o `birthtime` do *diretório* do esforço, que é uma data de criação de
+// verdade (o `mkdir` acontece uma vez, e o `Write` atômico de um `.md` lá dentro não toca o
+// inode do diretório). O payload carrega o fato **e a incerteza**: um piso nunca pode chegar
+// à tela vestido de data exata — data podre mente com mais confiança que a ausência dela.
+//
+// E ele pode viajar porque é **estável**: o `birthtime` de um diretório não se move nunca —
+// nem com salvamento, nem com a varredura. Dez escritas depois, o campo é o mesmo byte, e o
+// hash da supressão nem percebe que ele existe.
+
+test('a issue carrega o `created` — o piso do diretório do esforço, marcado como piso', async () => {
+  const b = await board()
+  const alpha = effortOf(b, 'alpha')
+
+  // O esforço publica a criação dele — o `birthtime` do diretório, que é fato exato.
+  assert.match(alpha.created, /^\d{4}-\d{2}-\d{2}$/, 'o created do esforço é um dia, não um instante')
+  assert.equal(alpha.created, dayAgo(0), 'o diretório nasceu neste teste: o dia é hoje')
+
+  for (const i of alpha.issues) {
+    // Toda issue herda o mesmo piso — é a limitação assumida da fatia 1 (o leque): o servidor
+    // não observou o nascimento de nenhuma, então o mais honesto que existe é "não antes do
+    // esforço". O catálogo (ticket 05) é quem afia isso, issue a issue.
+    assert.equal(i.created.day, alpha.created)
+    assert.equal(i.created.floor, true, 'um piso tem que viajar dizendo que é piso')
+  }
+})
+
+test('o `created` sobrevive ao arquivamento — o `mv` preserva o inode do diretório', async () => {
+  await put('efemero/issues/01-a.md', issue('01 — A', 'resolved'))
+  const nascido = effortOf(await board(), 'efemero').created
+  assert.equal(nascido, dayAgo(0))
+
+  // Arquivar é `mv .scratch/<slug> .scratch/archive/<slug>` — `rename` preserva o inode, e
+  // com ele o `birthtime`. É o que dá início e fim reais a um esforço terminado.
+  await mkdir(join(root, 'archive'), { recursive: true })
+  await rename(join(root, 'efemero'), join(root, 'archive/efemero'))
+
+  const b = await board()
+  const arquivado = b.archived.find((e) => e.slug === 'efemero')
+  assert.equal(arquivado.created, nascido, 'arquivar não pode apagar a data de criação')
+  assert.equal(arquivado.issues[0].created.day, nascido)
+})

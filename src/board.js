@@ -169,7 +169,7 @@ async function readStamped(path) {
  */
 const dayOf = (at) => new Date(at).toISOString().slice(0, 10)
 
-async function readIssue(ns, effortSlug, dir, file) {
+async function readIssue(ns, effortSlug, dir, file, born) {
   const path = join(dir, file)
   const { raw, at } = await readStamped(path)
   const { header, title } = parseDoc(raw)
@@ -182,6 +182,13 @@ async function readIssue(ns, effortSlug, dir, file) {
       ref: refIn(ns, path),
       id: `${effortSlug}/${file}`,
       touched: dayOf(at),
+      // Quando a issue nasceu — e, por enquanto, **um piso**, nunca um fato: o servidor não
+      // observou nascimento nenhum, então o mais honesto que existe é "não antes do esforço"
+      // (o `born` do diretório). O `floor` viaja junto porque a tela tem que desenhar a
+      // incerteza (borda esquerda aberta no Gantt); o catálogo (ticket 05) é quem afia isso,
+      // issue a issue, virando `floor: false` nas que ele viu nascer. Sem piso disponível,
+      // `null` — o board não inventa data para ter o que mostrar.
+      created: born ? { day: born, floor: true } : null,
       number: /^(\d+)/.exec(file)?.[1] ?? '',
       title: title ?? file.replace(/\.md$/, ''),
       status,
@@ -198,6 +205,18 @@ export async function readEffort(ns, root, slug) {
   const dir = join(root, slug)
   const issuesDir = join(dir, 'issues')
 
+  // O `birthtime` do **diretório** é a data de criação do esforço — de verdade. Ninguém
+  // recria um diretório: o `mkdir` acontece uma vez, o `Write` atômico de um `.md` lá dentro
+  // não toca o inode dele, e o `mv` do arquivamento (`rename`) o preserva. É o oposto do
+  // `birthtime` de *arquivo*, que o `Write` dos agentes reseta a cada salvamento — a
+  // armadilha que o `AGENTS.md` documenta em "Carimbo de filesystem não é eixo de tempo".
+  //
+  // E ele pode atravessar o fio sem ferir a supressão porque é **imóvel**: dez salvamentos
+  // depois, o campo é o mesmo byte. Num filesystem sem `birthtime` o stat devolve `0`, e aí
+  // não se publica nada — ausência, nunca uma data inventada (1970 mentiria com confiança).
+  const { birthtimeMs } = await stat(dir)
+  const born = birthtimeMs > 0 ? dayOf(birthtimeMs) : null
+
   let files = []
   try {
     files = (await readdir(issuesDir)).filter((f) => extname(f) === '.md').sort()
@@ -207,7 +226,7 @@ export async function readEffort(ns, root, slug) {
   // `orderIssues`. A ordem do array *é* a ordem da tela: o kanban (`public/effort.js`) filtra
   // por coluna, e `filter` preserva a ordem — então ordenar a lista uma vez, aqui, ordena
   // **dentro de cada coluna**, que é onde o olho procura.
-  const stamped = orderIssues(await Promise.all(files.map((f) => readIssue(ns, slug, issuesDir, f))))
+  const stamped = orderIssues(await Promise.all(files.map((f) => readIssue(ns, slug, issuesDir, f, born))))
   const issues = stamped.map((s) => s.issue)
 
   // Um item está bloqueado se qualquer issue que ele lista ainda não fechou. Uma
@@ -261,6 +280,10 @@ export async function readEffort(ns, root, slug) {
       // caminho de um documento (`<path>/map.md`) sem remontar o root da origem na mão.
       path: dir,
       ref: refIn(ns, dir),
+      // A criação do esforço — o `born` acima, e este é **exato**, não piso: o diretório
+      // nasceu quando nasceu. É a borda esquerda da barra-pai do Gantt global (ticket 04) e
+      // o piso que as issues herdam enquanto o catálogo não existe.
+      created: born,
       docs,
       title: lede?.title ?? null,
       blurb: lede?.blurb ?? '',

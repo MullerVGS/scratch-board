@@ -2,9 +2,9 @@
  * O roteador: o hash decide a tela — e a **origem** é a primeira coisa que ele diz.
  *
  * `#/<ns>` é a visão geral daquela origem, `#/<ns>/<slug>` o kanban de um esforço,
- * `#/<ns>/<slug>/grafo` o grafo, com `archive/` na frente quando o esforço já foi
- * encerrado. `#/pads` são os scratchpads, e eles ficam **fora** das origens: são rascunho
- * global de sessão, não tracker de repositório nenhum.
+ * `#/<ns>/<slug>/grafo` o grafo e `#/<ns>/<slug>/gantt` o Gantt, com `archive/` na frente
+ * quando o esforço já foi encerrado. `#/pads` são os scratchpads, e eles ficam **fora**
+ * das origens: são rascunho global de sessão, não tracker de repositório nenhum.
  *
  * **Toda rota é qualificada, e não há rota legada sem origem.** Um `#/x` em que `x` não é
  * uma origem conhecida cai na origem de casa — o hash não fica pela metade, e dois esforços
@@ -69,7 +69,7 @@ export function route() {
   const slug = rest[0]
   if (!slug) return renderOverview(ns)
 
-  renderEffort(ns, slug, archived, rest[1] === 'grafo')
+  renderEffort(ns, slug, archived, rest[1])
 }
 
 /** Relê **todas** as origens do servidor e redesenha a tela atual. */

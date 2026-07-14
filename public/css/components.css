@@ -336,3 +336,11 @@ button.refresh.spin {
     animation-name: none;
   }
 }
+
+/* A nota que uma visão deixa sob o desenho — o grafo sem aresta, o piso do Gantt. Mora
+   aqui porque reaparece em mais de uma tela; mover, não duplicar. */
+.viewnote {
+  margin: 8px 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}

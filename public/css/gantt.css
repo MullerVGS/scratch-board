@@ -1,0 +1,126 @@
+/* gantt — o grafo com o X virando tempo: o eixo de datas, as barras em HTML posicionado
+   e as setas do `Blocked by:` em SVG (as classes de aresta são as do graph.css). */
+
+/* Como o grafo, é uma superfície de desktop: as posições são pixel calculado, e a leitura
+   num telefone se faz arrastando DENTRO do contêiner — a página nunca rola para o lado. */
+.gantt {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 6px;
+}
+
+.gantt-canvas {
+  position: relative;
+}
+
+/* ---------- o eixo de datas ---------- */
+
+.gtick {
+  position: absolute;
+  top: 0;
+  border-left: 1px dashed var(--line-soft);
+  pointer-events: none;
+}
+
+.gtick span {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 10.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* "Hoje" é a única linha que não é passado — é ela que dá sentido às barras abertas. */
+.gtick.is-today {
+  border-left: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* O rótulo fica à ESQUERDA da linha: "hoje" costuma ser a borda direita do desenho, e um
+   rótulo para fora dela seria cortado pelo contêiner que rola. */
+.gtick.is-today span {
+  color: var(--accent);
+  left: auto;
+  right: 4px;
+}
+
+/* ---------- os rótulos ---------- */
+
+.glabel {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.glabel b {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.glabel span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.glabel:hover span,
+.glabel:focus-visible span {
+  color: var(--accent);
+}
+
+.glabel.is-closed span {
+  color: var(--muted);
+}
+
+/* ---------- as barras ---------- */
+
+.gbar {
+  position: absolute;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel-2));
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.gbar:hover {
+  border-color: var(--accent);
+  z-index: 2;
+}
+
+/* Fechada é história: a barra terminou onde terminou, e o verde diz "cumprida". */
+.gbar.is-closed {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
+  background: color-mix(in srgb, var(--green) 16%, var(--bg-soft));
+}
+
+.gbar.is-blocked {
+  border-color: color-mix(in srgb, var(--red) 55%, var(--line));
+}
+
+/* A borda esquerda ABERTA é o desenho do piso: "começou em algum momento antes daqui".
+   O fade substitui a borda — uma barra de início incerto não pode ter uma parede de
+   início. O `min()` protege a lasca: numa barra de meio dia, o fade não a apaga. */
+.gbar.is-floor {
+  border-left: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 min(18px, 70%));
+  mask-image: linear-gradient(90deg, transparent, #000 min(18px, 70%));
+}
+
+/* ---------- as setas ---------- */
+
+.gantt-edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}

@@ -32,7 +32,7 @@ As decisões que caem daí, e o que cada uma protege:
 - **A de casa vem primeira; o resto, em ordem alfabética.** `HOME_NS` (default `projetos`) é quem decide qual é a de casa, e ela é a entrada inicial: um `#/` nu vai para ela.
 - **O nome da origem decide o `ref`.** Os comandos partem de `/root/projetos`, então a de casa produz `.scratch/...` — nu, porque o agente já está lá — e qualquer outra produz `<nome>/.scratch/...`. **Nomeie a pasta do mount como o caminho do repo a partir de `/root/projetos`**, ou o comando copiado apontará para um lugar que não existe. O caminho do container nunca aparece na tela.
 - **O nome é um segmento só, e um repo aninhado ainda não tem como entrar.** `admin-server/administrative` está a dois níveis de `/root/projetos`, e um mount em `/workspace/scratches/admin-server/administrative` **não** cria uma origem chamada `admin-server/administrative`: ele cria um filho direto chamado `admin-server`, e o board o lê como uma origem cujo único "esforço" se chama `administrative`. Não estoura nada — **desenha um board plausível e errado**, que é o pior jeito de falhar. Enquanto isso não for resolvido (o `ref` teria que sair de outro lugar que não o nome da pasta), **monte só repos de primeiro nível**.
-- **Toda rota é qualificada, e não há rota legada.** `#/<ns>`, `#/<ns>/<slug>`, `#/<ns>/<slug>/grafo`, `#/<ns>/archive/<slug>`. O slug sozinho não endereça nada: **dois esforços com o mesmo slug em origens diferentes existem**, e um hash sem origem escolheria um dos dois no escuro. Um `#/<slug>` velho cai na origem de casa em vez de meio funcionar.
+- **Toda rota é qualificada, e não há rota legada.** `#/<ns>`, `#/<ns>/<slug>`, `#/<ns>/<slug>/grafo`, `#/<ns>/<slug>/gantt`, `#/<ns>/archive/<slug>`. O slug sozinho não endereça nada: **dois esforços com o mesmo slug em origens diferentes existem**, e um hash sem origem escolheria um dos dois no escuro. Um `#/<slug>` velho cai na origem de casa em vez de meio funcionar.
 - **Watcher, hash do board, digest dos arquivos e varredura são por origem.** O `cache.js` é uma **fábrica** (`createCache(ns)`) por isso: com o estado no módulo, duas origens dividiriam o mesmo hash, e a segunda a escrever teria a sua mudança **suprimida** pela primeira — o board de um repositório simplesmente parando de chegar, que é indistinguível de "nada mudou". Não há supressão cruzada, e não é uma regra a lembrar: é a forma da função.
 - **Uma conexão SSE, N origens.** Cada evento carrega `ns` e **só o board daquela origem** — mandar as N em todo evento seria pagar o board do `vend-server` toda vez que alguém escreve no `projetos`. O cliente guarda o board novo sempre; **redesenha só se a origem for a que está na tela**. Uma origem inativa que andou atualiza a contagem da própria aba e nada mais se mexe (medido: **0 re-render** da origem ativa, e a aba do `projetos` subindo de 58 para 59 enquanto o `vend-server` estava aberto). Trocar de aba não faz request: o board já está na mão.
 - **O snapshot de conexão manda todas as origens, uma por frame.** Quem reconecta não sabe quanto tempo ficou fora, e a origem que não está na tela também pode ter andado.
@@ -43,7 +43,7 @@ As decisões que caem daí, e o que cada uma protege:
 
 ```
 docker compose up -d      # http://localhost:7777 (só loopback)
-node --test test/         # 134 testes, zero dependências
+node --test test/         # 157 testes, zero dependências
 ```
 
 `src/`, `shared/` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta. **Mexer nas origens é a exceção**: elas são descobertas no `start()`, então um mount novo pede `docker compose up -d --force-recreate`, não um restart.
@@ -189,13 +189,16 @@ O `shared/` **não** entrou em `src/`, e é deliberado: `src/` é o que só o se
 
 | Módulo | Assunto |
 | --- | --- |
-| `dom.js` | `el()`, **`svg()`**, `esc()`, `api()`, `toast()`, `copy()`, `copyBtn()` |
+| `dom.js` | `el()`, **`svg()`**, `esc()`, `api()`, `toast()`, `copy()`, `copyBtn()`, `pressable()` |
 | `shell.js` | A moldura: `view`, `crumbs`, `tally`, as **abas de origem**, o indicador de conexão e o botão de reler |
 | `state.js` | Os boards na mão do cliente — **um por origem** (`state.boards[ns]`), num **contêiner mutável**, não num `let` exportado (um binding exportado é cópia viva só para quem já importou) |
 | `prompts.js` | `effortPrompts()` / `issuePrompts()` — o comando que destrava cada estado |
 | `issues.js` | **Puro**: `cleanTitle`, `numberIndex`, `depsOf`, `openDeps`, `staleLabel`/`STALE_DAYS` |
 | `graph-layout.js` | **Puro**: `layerize()`, `graphLayout()`, `edgePath()`, `NODE_W/H`, `GAP_X/Y`, `PAD` |
 | `graph.js` | O desenho: nós em HTML posicionado, curvas em SVG |
+| `edges.js` | A maquinaria de setas que grafo e Gantt compartilham: `edgeDefs()`, `edgeEl()` — os `<marker>` e a prosa do bloqueio no tooltip, uma vez só |
+| `gantt-layout.js` | **Puro**: `ganttLayout()`, `arrowPath()` — o tempo virando geometria; o "hoje" entra por parâmetro |
+| `gantt.js` | O desenho do Gantt: eixo de datas, barras em HTML posicionado, setas em SVG |
 | `overview.js` | A visão geral e os chips de status |
 | `effort.js` | A página do esforço: kanban, barra de documentos, viewswitch |
 | `pads.js` | Os scratchpads de sessão |
@@ -325,11 +328,12 @@ Não há `style.css`. As 1755 linhas dele viraram **nove folhas por assunto** em
 | `css/shell.css` | A moldura: topo (e o `.dot` da conexão), trilha, `main`, cabeçalho de seção, `#toast`, `.empty`. |
 | `css/efforts.css` | A visão geral: `.grid` e o card `.effort`. |
 | `css/pads.css` | O segundo root (`#/pads`). |
-| `css/components.css` | O que reaparece em mais de uma tela: `.copy`, `.prompt`, `.chip`, `.actionbar`/`button.act`, o botão de reler. |
+| `css/components.css` | O que reaparece em mais de uma tela: `.copy`, `.prompt`, `.chip`, `.actionbar`/`button.act`, o botão de reler, `.viewnote`. |
 | `css/kanban.css` | `.board` (flex), `.col`/`.col.is-empty`, `.card`. |
 | `css/drawer.css` | O painel: `#scrim`, `#drawer`, `#drawer-grip`, `.drawer-head`, `button.icon`, `#drawer-actions`, `#drawer-body` (incluindo `.swapped` e `.gone`). |
 | `css/markdown.css` | O documento renderizado: `#drawer-body.md`, o bloco `.meta`, os alvos do renderer. |
 | `css/graph.css` | `.viewswitch`, `.graph`, `.gedge`, `.gnode`. |
+| `css/gantt.css` | O Gantt: `.gtick` (o eixo), `.glabel`, `.gbar` — e a borda aberta do piso (`.is-floor`). As arestas reusam as classes do `graph.css`. |
 
 **A ordem dos `<link>` é a cascata**, e reproduz a ordem do antigo arquivo único — está comentada no `<head>`. Mexer nela é mexer no desempate entre regras de mesma especificidade.
 
@@ -347,7 +351,7 @@ Uma arrumação pendente, para quem passar por ali: **`button.icon` ainda mora n
 
 ## O grafo de dependências
 
-A página de um esforço tem duas visões, e a escolhida vive no **hash** (`#/<slug>/grafo`) — não em `localStorage`: é onde já vive o resto da navegação, e assim o grafo de um esforço vira um link colável.
+A página de um esforço tem três visões — lista, grafo e Gantt —, e a escolhida vive no **hash** (`#/<ns>/<slug>/grafo`, `#/<ns>/<slug>/gantt`) — não em `localStorage`: é onde já vive o resto da navegação, e assim cada visão de um esforço vira um link colável.
 
 O grafo nasceu de querer as setas de um Gantt sem o Gantt. Um Gantt gasta o eixo X com tempo, e o `.scratch/` não tem data de início nem duração; inventá-las à mão em cada `.md` criaria um estado que ninguém mantém, e **data podre mente com mais confiança que a ausência dela** (ver **Carimbo de filesystem não é eixo de tempo**). Mas as setas não precisam de tempo: elas são as arestas do `Blocked by:`, e essas existem. Trocado o eixo por **profundidade**, a camada 0 passa a ser a frontier — o que dá para atacar agora — e cada coluna à direita é o que aquilo destrava.
 
@@ -384,6 +388,29 @@ Um Gantt construído sobre isso sairia com **barras de duração zero**.
 - **O `mtime` de um ticket parado é quando ele entrou no estado atual**, porque ticket encalhado é, por definição, ticket que ninguém tocou.
 
 Ou seja: **há backfill, e ele é real.** O que *não* se recupera é o `created` **por ticket** — para isso, o diretório do esforço dá um **piso** honesto (o ticket não pode ser mais velho que o esforço).
+
+## O Gantt de um esforço
+
+`#/<ns>/<slug>/gantt`, a terceira aba do viewswitch. **É o grafo com o X virando tempo**: o grafo nasceu de querer as setas de um Gantt sem ter o eixo (ver a seção acima) — e a seção anterior mostrou que o eixo estava no disco o tempo todo. Mesmas setas do `Blocked by:`, mesma prosa no tooltip, X virando data.
+
+As bordas de cada barra são as da seção anterior, viradas em desenho:
+
+- **direita de ticket fechado** = o `touched` (o dia do `mtime`): a resolução dele, real e retroativa;
+- **direita de ticket aberto** = hoje — a barra mostra o quanto ele já está custando. O "hoje" é **do navegador**, nunca do payload: um "hoje" do servidor envelheceria com o relógio e faria a varredura empurrar o board parado;
+- **esquerda** = o `created` da issue, que hoje é **um piso** (o `birthtime` do diretório do esforço), e o payload o marca: `{ day, floor: true }`. **Piso não é fato, e a tela diz isso** — barra de início incerto sai com a **borda esquerda aberta** (o fade do `.is-floor`), e sem carimbo nenhum a barra se ancora na própria borda direita em vez de inventar 1970. O catálogo (ticket 05) é quem afia o piso em data exata, issue a issue.
+
+O `created` pode viajar no payload sem ferir a supressão porque é **imóvel**: `birthtime` de diretório não se move com salvamento nenhum (e sobrevive ao `mv` do arquivamento — há teste). É a mesma doutrina do `touched`: o que atravessa o fio é fato estável e absoluto; quem envelhece é o relógio de quem olha.
+
+**A limitação assumida da fatia 1, e ela é visível**: sem o catálogo, toda issue de um esforço herda o mesmo piso e as barras nascem do mesmo ponto — **um leque, não um escalonamento**. É honesto, já responde "quanto tempo cada coisa levou", e a nota sob o desenho explica a borda aberta.
+
+Como o grafo, **o layout é puro** (`public/gantt-layout.js`) **e o desenho é DOM** (`public/gantt.js`) — os invariantes moram em `test/gantt-layout.test.js`, com o mesmo guarda que proíbe o módulo puro de tocar `document`/`innerHTML` (e um a mais: `Date.now` — o "hoje" entra por parâmetro). Os que valem a pena conhecer:
+
+- **nenhuma barra começa depois de terminar** — nem quando o disco contradiz o piso (um `cp -p` fabrica `mtime` anterior ao `mkdir`; a barra se recolhe à borda direita em vez de nascer negativa);
+- **nenhuma seta anda para trás no tempo.** No leque isso não é dado de graça: o bloqueante fecha *depois* de o bloqueado "começar", então a seta sai da resolução do bloqueante e entra na barra do bloqueado **dali em diante** (`max`), nunca na borda esquerda;
+- **ciclo não estoura** — aqui de graça, porque não há recursão: cada aresta é geometria própria;
+- **as linhas saem na ordem da resolução**, não na do número: o desenho conta a história na ordem em que ela aconteceu, e as abertas afundam para o fim, correndo até a linha de "hoje".
+
+Os nós de rótulo e as barras são HTML posicionado (clique abre a gaveta, como na lista); o SVG só desenha as setas — e pelo `svg()`, pela mesma razão do grafo: um `<marker>` montado pelo `el()` some sem erro nenhum.
 
 ### O `mtime` no payload mata o push — mas a *ordem* não
 
@@ -475,13 +502,14 @@ Isto foi uma **escolha**, não um esquecimento. As duas saídas custavam mais do
 
 ## Os testes
 
-`node --test test/` — **134 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
+`node --test test/` — **157 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
 
 | Costura | O que trava |
 | --- | --- |
 | `test/doc.test.js` | O parser (`shared/doc.js`, puro): os três dialetos, o `Status:` do corpo que **não** vira estado, o `Blocked by:` com prosa, o `summarize()` pulando o preâmbulo, o status desconhecido virando `?`. |
 | `test/md.test.js` | O renderer (`md.js`, `string → string`): a **ordem das transformações** e o `Blocked by:` que linka sem engolir a justificativa. |
 | `test/graph-layout.test.js` | Os invariantes do grafo (puros): a camada é o **maior** caminho, nenhuma aresta anda para trás, ciclo não estoura, o baricentro, e o guarda que impede o módulo (e o `issues.js`) de voltar a tocar o DOM. |
+| `test/gantt-layout.test.js` | Os invariantes do Gantt (puros): nenhuma barra começa depois de terminar (nem com o disco contradizendo o piso), nenhuma seta anda para trás no tempo, piso distinto de exato, ausência de data que não vira data inventada, aberto que corre até o "hoje" **do parâmetro**, ciclo que não estoura, e o guarda de pureza — com `Date.now` na lista proibida. |
 | `test/issues.test.js` | O vocabulário puro do cliente: o rótulo **"parado há N dias"** — o limiar de 3 dias, o ticket recém-tocado que **cala**, o fechado que nunca está "parado" (está pronto), a ausência de carimbo que não vira data inventada, e a conta de dias inteiros que não escorrega com a hora. O "agora" entra por parâmetro; não há relógio a mockar. |
 | `test/server.test.js` | **A costura mais alta.** Servidor de verdade em porta efêmera contra um `.scratch/` temporário, stream SSE lido com o `fetch` nativo, **arquivos escritos de verdade no disco**: o push, o debounce, a supressão, o esforço novo que aparece sem restart, o caminho fora do root recusado, os dois eventos (`message` × `files`), e a **segunda escrita atômica** do mesmo arquivo — o teste que o watcher derrubaria, e o que impede alguém de "simplificar" o digest de volta para a lista de caminhos. E a **ordem por atividade**: o esforço quente que abre a tela, a coluna do kanban ordenada, o ticket que **não era o primeiro** subindo ao topo num `message`, e os salvamentos seguintes — com ele **já em primeiro** — voltando a ser `files`. E o **carimbo de parada**: o dia absoluto que o encalhado carrega (nenhuma string relativa viaja), e os salvamentos do mesmo dia que **não movem o hash**. O tempo se fabrica com `utimes()`; não há relógio a mockar. |
 | `test/watch.test.js` | O reopen depois do `error`, e um root que ainda não existe. |

@@ -5,9 +5,10 @@
  * mesmos da lista, sem reimplementar texto em SVG. A geometria não é decidida aqui —
  * ela vem inteira do `graph-layout.js`, que é puro e testado.
  */
-import { el, esc, svg } from './dom.js'
+import { el, esc, svg, pressable } from './dom.js'
 import { cleanTitle, numberIndex, depsOf } from './issues.js'
 import { graphLayout, edgePath, NODE_W, NODE_H } from './graph-layout.js'
+import { edgeDefs, edgeEl } from './edges.js'
 import { openIssue } from './drawer.js'
 
 function graphNode(issue, effort, archived, at) {
@@ -20,14 +21,7 @@ function graphNode(issue, effort, archived, at) {
       <span class="chip" data-s="${esc(issue.status)}">${esc(issue.status)}</span>
     </article>
   `)
-  node.onclick = () => openIssue(issue, effort, archived)
-  node.onkeydown = (ev) => {
-    if (ev.key === 'Enter' || ev.key === ' ') {
-      ev.preventDefault()
-      openIssue(issue, effort, archived)
-    }
-  }
-  return node
+  return pressable(node, () => openIssue(issue, effort, archived))
 }
 
 /**
@@ -49,40 +43,23 @@ export function renderGraph(effort, archived) {
   const canvas = el(`<div class="graph-canvas" style="width:${width}px; height:${height}px"></div>`)
   const edges = svg('svg', { class: 'graph-edges', width, height })
 
-  // Um marcador por classe de aresta. `el()` monta HTML, e um `<defs>` construído ali
-  // não estaria no namespace SVG — o navegador o aceitaria e o ignoraria, e as setas
-  // sumiriam sem erro nenhum. Daí o `svg()` em cada nó.
-  const defs = svg('defs', {})
-  for (const kind of ['blocking', 'satisfied']) {
-    const marker = svg('marker', {
-      id: `arrow-${kind}`,
-      viewBox: '0 0 8 8',
-      refX: 7,
-      refY: 4,
-      markerWidth: 6,
-      markerHeight: 6,
-      orient: 'auto-start-reverse',
-    })
-    marker.append(svg('path', { d: 'M 0 0 L 8 4 L 0 8 z', class: `arrow ${kind}` }))
-    defs.append(marker)
-  }
-  edges.append(defs)
+  // Os marcadores e o traço com tooltip são a maquinaria compartilhada com o Gantt — e são
+  // `svg()` por dentro, porque um `<marker>` montado pelo `el()` some sem erro nenhum.
+  edges.append(edgeDefs('graph'))
 
   let drawn = 0
   for (const issue of effort.issues) {
     for (const { dep, note, raw } of depsOf(issue, byNumber)) {
-      const blocking = !dep.closed
-      const path = svg('path', {
-        class: `gedge ${blocking ? 'blocking' : 'satisfied'}`,
-        d: edgePath(at(dep), at(issue)),
-        'marker-end': `url(#arrow-${blocking ? 'blocking' : 'satisfied'})`,
-      })
-      // A prosa depois do número é a justificativa do bloqueio — o hover devolve ela.
-      const tip = svg('title', {})
-      tip.textContent = note ? `${dep.number} → ${issue.number}: ${note}` : `${dep.number} → ${issue.number}`
-      path.append(tip)
-      path.setAttribute('data-raw', raw)
-      edges.append(path)
+      edges.append(
+        edgeEl('graph', {
+          d: edgePath(at(dep), at(issue)),
+          blocking: !dep.closed,
+          from: dep,
+          to: issue,
+          note,
+          raw,
+        }),
+      )
       drawn++
     }
   }
@@ -93,7 +70,7 @@ export function renderGraph(effort, archived) {
 
   if (!drawn) {
     wrap.prepend(
-      el('<p class="graph-note">Nenhuma issue deste esforço declara <code>Blocked by:</code> — o grafo é uma coluna só.</p>'),
+      el('<p class="viewnote">Nenhuma issue deste esforço declara <code>Blocked by:</code> — o grafo é uma coluna só.</p>'),
     )
   }
   return wrap
