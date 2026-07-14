@@ -185,7 +185,25 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
     // duas listas separadas: esforço arquivado é esforço **terminado** — exatamente aquele
     // cuja duração o Gantt existe para mostrar. Observar só os ativos apagaria do catálogo a
     // única história completa que existe.
-    await history.observe(name, [...board.efforts, ...board.archived], Date.now())
+    //
+    // O catálogo é **best-effort**: ele espia a leitura do board, não é dono dela. `observe()`
+    // escreve em disco (o log, o batimento), e essa escrita pode falhar por um motivo que não
+    // tem nada a ver com o board que acabou de ser lido com sucesso — disco cheio, volume
+    // remontado `ro`, o log virando diretório por baixo dele. Deixar isso subir derrubaria a
+    // leitura por causa da escrita de um espectador, e no `/api/stream` (onde os headers já
+    // saíram) isso não vira um 500: vira `ERR_HTTP_HEADERS_SENT` não capturado, e o processo
+    // inteiro morre — todas as origens, para todos os clientes. Contido aqui, do jeito que o
+    // watcher e a varredura já contêm a falha do próprio `sync()`.
+    //
+    // Mas silêncio total também não serve — é a doutrina deste projeto (ver **A rede de
+    // segurança**, no AGENTS.md): um catálogo que para de gravar sem avisar é exatamente o
+    // modo de falha que o push inteiro existe para não ter. Por isso o erro vai para o log do
+    // container, mesmo sem subir.
+    try {
+      await history.observe(name, [...board.efforts, ...board.archived], Date.now())
+    } catch (err) {
+      console.error(`catálogo: falha ao observar ${name}: ${err.message}`)
+    }
 
     if (moved) broadcast(frame(name, json, changed))
     else if (changed.length) broadcast(fileFrame(name, changed))

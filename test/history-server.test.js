@@ -183,3 +183,30 @@ test('o board serializado não ganhou campo nenhum', async (t) => {
   assert.doesNotMatch(board, /"since"/)
   assert.doesNotMatch(board, /"alive"/)
 })
+
+test('o catálogo é best-effort: a escrita dele falhando não derruba o board nem o processo', async (t) => {
+  const { ns, root } = await bootstrap()
+  await put(root, 'eixo/issues/01-um.md', issueDoc('Um', 'ready-for-agent'))
+
+  // Torna a escrita do catálogo impossível, do jeito mais direto e determinístico: o caminho
+  // de `history.jsonl` vira um **diretório**. O `observe()` estoura `EISDIR` no `appendFile`
+  // toda vez que o board é lido — o mesmo formato de falha que um disco cheio ou um volume
+  // remontado `ro` produziriam.
+  const log = join(histDir, 'history.jsonl')
+  await rm(log, { recursive: true, force: true })
+  await mkdir(log)
+
+  const s = await boot(t)
+
+  // O board já tinha sido lido com sucesso quando o `observe()` falhou. `/api/board` serve o
+  // board de verdade, não o `400` de uma escrita que não é dele.
+  const res = await fetch(`http://127.0.0.1:${s.port}/api/board`)
+  assert.equal(res.status, 200)
+  const b = (await res.json()).boards[ns]
+  assert.equal(b.efforts.find((e) => e.slug === 'eixo')?.total, 1)
+
+  // E o processo continua de pé: uma segunda leitura, depois da falha do catálogo, ainda
+  // responde — nada derrubou o servidor inteiro.
+  const again = await fetch(`http://127.0.0.1:${s.port}/api/board`)
+  assert.equal(again.status, 200)
+})
