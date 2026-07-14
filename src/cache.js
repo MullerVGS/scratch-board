@@ -88,6 +88,11 @@ export function createCache(ns) {
    * Uma leitura que estoura vira um board de erro, não uma exceção que sobe: a falha fica
    * **contida nesta origem**, e as outras continuam de pé. Ela também passa pelo hash, então
    * um erro que persiste é empurrado uma vez, não a cada volta da varredura.
+   *
+   * O **objeto** do board sai junto com o JSON dele. O catálogo (`history.js`) precisa dos
+   * status das issues, e eles já foram parseados aqui: reabrir os `.md` lá seria um segundo
+   * leitor de disco, capaz de divergir deste. O board é a única leitura, e todo mundo come
+   * dela.
    */
   async function refresh() {
     let board
@@ -100,7 +105,7 @@ export function createCache(ns) {
     const next = hashOf(json)
     const changed = next !== hash
     hash = next
-    return { json, hash, changed }
+    return { json, hash, changed, board }
   }
 
   // ---------- a supressão do arquivo ----------
