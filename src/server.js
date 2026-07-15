@@ -24,6 +24,7 @@ import { resolve, extname, sep } from 'node:path'
 
 import { PADS, SCRATCHES, discover } from './paths.js'
 import { listPads } from './pads.js'
+import { buildBoard } from './board.js'
 import { createCache } from './cache.js'
 import { watchTree } from './watch.js'
 import { createHistory } from './history.js'
@@ -313,6 +314,28 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
 
   // O disco de agora não é novidade: o servidor nasce sabendo o que está em cada origem.
   await Promise.all([...wires.values()].map((w) => w.cache.seed()))
+
+  // **E o catálogo também é semeado**, pelo mesmo motivo com outra roupa. O `held` de cada
+  // issue (`"em <coluna> há N"`) nasce do primeiro `seen` que o servidor grava; se esse `seen`
+  // só fosse escrito no primeiro `sync()` (a conexão, a varredura), o campo saltaria de vazio
+  // para o instante observado num board **parado** — um push fantasma que a varredura de
+  // segurança proíbe (ver `sweep.test.js`). Registrando o `seen` de tudo que já está no disco
+  // **antes de servir**, o `held` nasce estável.
+  //
+  // Idempotente no restart: `createHistory()` releu o log, e `observe()` só grava o que é novo —
+  // um ticket que já tinha `seen` persistido não ganha outro, então o piso segue crescendo desde
+  // a primeira observação da vida, sobrevivendo aos restarts. Best-effort, como todo `observe()`.
+  const seededAt = Date.now()
+  await Promise.all(
+    namespaces.map(async (ns) => {
+      try {
+        const board = await buildBoard(ns, history)
+        await history.observe(ns.name, [...board.efforts, ...board.archived], seededAt)
+      } catch (err) {
+        console.error(`catálogo: falha ao semear ${ns.name}: ${err.message}`)
+      }
+    }),
+  )
 
   const server = createServer(handler)
 

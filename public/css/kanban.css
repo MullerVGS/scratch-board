@@ -156,11 +156,13 @@
 
 /**
  * As duas notas do card. Mesma forma, e só a cor as separa — porque só a cor as **distingue**:
- * o vermelho diz que alguém *segura* o ticket; o âmbar, que ninguém o tocou. Encalhar não é um
- * erro, é um fato do disco — a mesma distinção que a gaveta faz com o arquivo que sumiu.
+ * o vermelho diz que alguém *segura* o ticket (o `Blocked by:`); o âmbar diz há quanto tempo
+ * ele está na coluna atual (`"em curso há 40min"`), e é a **unidade** que faz o encalhe saltar
+ * — um `"há 6 dias"` no meio de vários `"há 20min"`. Tempo na coluna não é erro, é um fato do
+ * disco; âmbar e não vermelho, a mesma distinção que a gaveta faz com o arquivo que sumiu.
  */
 .blocked-tag,
-.stale-tag {
+.column-tag {
   font-size: 11px;
 }
 
@@ -168,6 +170,6 @@
   color: var(--red);
 }
 
-.stale-tag {
+.column-tag {
   color: var(--amber);
 }

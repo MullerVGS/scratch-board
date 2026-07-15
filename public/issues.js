@@ -33,48 +33,53 @@ export const openDeps = (issue, effort) =>
   depsOf(issue, numberIndex(effort.issues)).filter((d) => !d.dep.closed)
 
 /**
- * **O limiar do rótulo de parada, em dias**, e ele mora no cliente de propósito.
+ * **O piso abaixo do qual o rótulo não informa.** Um ticket que entrou na coluna há segundos
+ * não diz encalhe nenhum — `"em curso há 0min"` é ruído. Abaixo de um minuto, o card cala.
  *
- * Se o corte fosse do servidor — publicar o carimbo só acima dele —, um ticket cruzando os
- * três dias **à meia-noite** mudaria o payload sem ninguém ter escrito nada, e a varredura
- * seguinte empurraria o board inteiro sozinha. O servidor manda o fato (`issue.touched`, o
- * dia em que o ticket parou); quem envelhece é o relógio de quem olha.
- *
- * **Três dias, e não é gosto — é um vale medido na frota.** Dos 79 tickets abertos:
- *
- * | dias parados | 0 | 1 | 2 | 3 | 4 | 5 |
- * | --- | --- | --- | --- | --- | --- | --- |
- * | tickets | 25 | 29 | 16 | **0** | 8 | 1 |
- *
- * Nada mora no dia 3: as duas populações — trabalho recente e trabalho encalhado — não se
- * tocam, e o corte cai no buraco entre elas. Em `2`, um terço do board sairia rotulado e o
- * rótulo deixaria de informar (dois dias cabem inteiros num fim de semana); em `3`, quem
- * acende é só o que de fato travou.
+ * Ele mora no cliente pela mesma razão que o relativo mora: fosse um corte do servidor, o
+ * ticket cruzando o limiar **enquanto ninguém escreve** mudaria o payload, e a varredura de
+ * 90s empurraria o board sozinho. O servidor manda o fato imóvel (`issue.held.at`); quem
+ * envelhece é o relógio de quem olha.
  */
-export const STALE_DAYS = 3
+export const MIN_COLUMN_MS = 60_000
 
 /**
- * O rótulo do card, ou `null` quando ele não informa nada.
+ * O intervalo `ms` na **maior unidade que ainda informa** — a conta que o card faz para
+ * `"em <coluna> há N"`. Boa parte do trabalho aqui dura menos de um dia, e um rótulo preso em
+ * dias diria `"há 0 dias"` o tempo todo; então ele desce: **dias**, senão **horas**, senão
+ * **minutos**. É a única razão de o servidor mandar o instante ao segundo, e não um dia.
+ */
+function elapsed(ms) {
+  const min = Math.floor(ms / 60_000)
+  if (min < 60) return `${min}min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h}h`
+  const d = Math.floor(h / 24)
+  return `${d} ${d === 1 ? 'dia' : 'dias'}`
+}
+
+/**
+ * O rótulo do card: **`"em pronto há 6 dias"`** — o tempo na coluna atual —, ou `null` quando
+ * ele não informa nada. Lê `issue.held = { at, floor }`, o instante absoluto em que o ticket
+ * entrou na coluna e se esse instante é fato ou piso.
  *
- * Duas ausências deliberadas, e as duas são o board **calando** em vez de mentir:
- *
- * - **Issue fechada nunca está parada** — está pronta. O `mtime` de um ticket `resolved` é a
- *   **resolução** dele, e um "parado há 30 dias" ali seria uma data verdadeira contando uma
- *   história falsa.
- * - **Sem carimbo, nada é dito.** Não se inventa uma data para ter o que mostrar.
+ * - **Piso** (`floor`): o servidor nunca viu o ticket entrar nessa coluna, só o encontrou já
+ *   nela — o `≥` diz isso (`"em pronto há ≥3 dias"`), e some sozinho quando a transição é
+ *   observada. O viés está no lado seguro: subestima o encalhe, jamais o esconde.
+ * - **Issue fechada nunca recebe rótulo** — está pronta, não parada. Um `"em fechado há N"`
+ *   seria uma data verdadeira contando uma história falsa.
+ * - **Sem `held.at`, nada é dito** — o catálogo ainda não sabe, e não se inventa uma data.
+ * - **Abaixo de um minuto, nada é dito** — acabou de entrar, não informa (ver `MIN_COLUMN_MS`).
  *
  * O `now` entra por parâmetro porque a conta é pura — e é assim que ela se testa sem relógio
  * nenhum a mockar.
  */
-export function staleLabel(issue, now = Date.now()) {
-  if (issue.closed || !issue.touched) return null
-  // Dias inteiros, dos dois lados: o carimbo já vem quantizado por dia (o servidor o derivou
-  // assim), então a hora não entra na conta e o número não escorrega ao longo do dia.
-  //
-  // A conta é em dia **UTC**, dos dois lados — e a assimetria assumida é que, num fuso a
-  // oeste, o contador vira algumas horas antes da meia-noite de quem olha. Num rótulo cuja
-  // granularidade **é** o dia, e cujo limiar são três, isso não muda nada do que ele informa;
-  // misturar dia local com carimbo UTC é que daria erro de um dia de verdade.
-  const days = Math.floor(now / 864e5) - Math.floor(Date.parse(issue.touched) / 864e5)
-  return days >= STALE_DAYS ? `parado há ${days} dias` : null
+export function columnLabel(issue, now = Date.now()) {
+  if (issue.closed) return null
+  const at = issue.held?.at
+  if (!at) return null
+  const ms = now - Date.parse(at)
+  if (ms < MIN_COLUMN_MS) return null
+  const prefix = issue.held.floor ? '≥' : ''
+  return `em ${issue.column} há ${prefix}${elapsed(ms)}`
 }

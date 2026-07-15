@@ -338,6 +338,13 @@ test('a SEGUNDA escrita atômica do mesmo arquivo também chega — o watcher pe
     await atomica('O corpo original.\n')
     assert.equal((await stream.next()).event, 'message')
 
+    // O `held` do ticket recém-nascido assenta **no ciclo seguinte** — a observação vem depois
+    // da leitura no mesmo `sync()` (a retaguarda do catálogo, a mesma da barra do Gantt). Esse
+    // `board()` é esse ciclo, e o `message` que ele gera é consumido aqui: o que este teste mede
+    // é a **escrita atômica** seguinte, não o assentamento do `held`.
+    await board()
+    assert.equal((await stream.next()).event, 'message')
+
     // Da segunda em diante é só corpo — e é aqui que o watcher já perdeu o nome do arquivo.
     for (const corpo of ['## Answer\n\nPrimeira versão.\n', '## Answer\n\nSegunda, por cima.\n']) {
       await atomica(corpo)
@@ -601,98 +608,101 @@ test('mas trabalhar num ticket o traz ao topo NO MESMO DIA — tempo continua se
   )
 })
 
-// ## O carimbo de parada — "parado há N dias"
+// ## O tempo na coluna — "em <coluna> há N"
 //
-// A ordem, acima, não carrega carimbo nenhum. Este carrega — e é a única coisa do board que
-// carrega —, então as duas regras que o protegem viram teste aqui:
+// A ordem, acima, não carrega carimbo nenhum. Este carrega — `issue.held = { at, floor }` —, e é
+// a única coisa temporal do board que carrega. Ele vem do **catálogo** (a transição de
+// `Status:`), não do `mtime`, e é isso que este bloco prende:
 //
-//   - **absoluto**, nunca relativo: o servidor manda o **dia**, e o `"há 6 dias"` é conta do
-//     navegador. Uma string relativa mudaria **com o relógio**, e a varredura de 90s a
-//     recalcularia — o board empurrando sozinho, parado, para sempre;
-//   - **quantizado por dia**: dez salvamentos hoje dão o mesmo valor, o campo não se move e o
-//     hash não se move. É o `mtime` cru que mataria a supressão, não a data dele.
+//   - **absoluto e imóvel**, nunca relativo: o servidor manda o **instante** em que o ticket
+//     entrou na coluna; o `"há 6 dias"`, a unidade e o limiar são conta do navegador. Uma
+//     string relativa mudaria com o relógio, e a varredura de 90s a recalcularia — o board
+//     empurrando sozinho, parado, para sempre;
+//   - **só a transição de `Status:` o move**. Reescrever o corpo — o caso do Taiga, que
+//     originou este redesenho — deixa o `held` **imóvel**. O `mtime` zerava o contador; o
+//     catálogo não.
+//
+// O `held` de um ticket criado depois da subida aparece **um ciclo depois** dele: a observação
+// vem *depois* da leitura no mesmo `sync()`, então a primeira leitura o vê sem instante e a
+// seguinte já o tem — a mesma retaguarda da barra do Gantt. Daí o `settle()`: dois `board()`, um
+// que observa e outro que lê o observado.
 
-/** O dia (UTC) de `d` dias atrás, no formato que o payload publica. */
+/** O dia (UTC) de `d` dias atrás — a granularidade do `created`/`ended` do esforço. */
 const dayAgo = (d) => new Date(Date.now() - d * 864e5).toISOString().slice(0, 10)
 
-test('o ticket encalhado carrega o DIA em que parou — absoluto, e o `mtime` cru continua fora', async () => {
+/** Duas voltas de `sync()`: a primeira observa a transição/nascimento, a segunda a lê já gravada. */
+const settle = async () => {
+  await board()
+  return board()
+}
+
+test('o ticket carrega o INSTANTE em que entrou na coluna, como piso — e nada relativo viaja', async () => {
   await put('encalhado/issues/01-frio.md', issue('01 — Frio', 'ready-for-agent'))
-  await age('encalhado/issues/01-frio.md', 6)
+  const frio = effortOf(await settle(), 'encalhado').issues[0]
 
-  const b = await board()
-  const frio = effortOf(b, 'encalhado').issues[0]
+  // Um instante ISO, não um dia e não uma string relativa. O servidor **nunca viu** este ticket
+  // transicionar (nasceu em `ready-for-agent` e ficou), então o instante é um **piso**: `floor`.
+  assert.match(frio.held.at, /^\d{4}-\d{2}-\d{2}T/, 'o `held.at` tem que ser um instante ISO')
+  assert.equal(frio.held.floor, true, 'nunca observado transicionar: o número é um piso')
 
-  // Uma data, e só a data: `2026-07-08`. O `mtime` cru (`1752...`) publicaria a hora e o
-  // milissegundo — e cada salvamento do agente moveria o hash.
-  assert.match(frio.touched, /^\d{4}-\d{2}-\d{2}$/, 'o carimbo tem que ser um dia, não um instante')
-  assert.equal(frio.touched, dayAgo(6))
-
-  // **Nada de tempo relativo no fio.** O quanto isso é "há N dias" é conta do navegador contra
-  // o relógio dele; o que viaja é o fato, que não envelhece.
-  const serializado = JSON.stringify(effortOf(b, 'encalhado').issues)
-  for (const relativo of ['há ', 'atrás', 'parado h']) {
+  // **Nada de tempo relativo no fio.** O quanto isso é "há N" é conta do navegador; o que viaja
+  // é o fato imóvel, que não envelhece.
+  const serializado = JSON.stringify(effortOf(await board(), 'encalhado').issues)
+  for (const relativo of ['há ', 'atrás', ' dias', '≥']) {
     assert.equal(serializado.includes(relativo), false, `\`${relativo}\` não pode viajar no payload`)
   }
 
-  // E o guarda de sempre continua de pé: o carimbo que **ordena** não viaja de jeito nenhum.
+  // E o guarda de sempre: o `mtime` cru que **ordena** não viaja, nem como `at` no topo da issue.
   assert.equal('at' in frio, false)
   assert.equal('mtime' in frio, false)
 })
 
-test('o ticket recém-tocado carrega o dia de HOJE — quem cala o rótulo é o navegador', async () => {
-  // O servidor não decide se o rótulo aparece: ele publica o fato, sempre, e o limiar (3 dias,
-  // em `public/issues.js`) mora no cliente. Se o corte morasse aqui, um ticket cruzando o
-  // limiar **à meia-noite** moveria o hash sem ninguém ter escrito nada — a varredura seguinte
-  // empurraria o board inteiro sozinha. O carimbo absoluto só se move quando o disco se move.
-  const b = await board()
-  const quente = effortOf(b, 'alpha').issues.find((i) => i.file === '01-um.md')
-  assert.equal(quente.touched, dayAgo(0))
+test('mudar o `Status` reinicia o contador na coluna nova, e o piso vira fato', async () => {
+  await put('anda/issues/01-a.md', issue('01 — A', 'ready-for-agent'))
+  const antes = effortOf(await settle(), 'anda').issues[0]
+  assert.equal(antes.column, 'pronto')
+  assert.equal(antes.held.floor, true, 'antes da primeira transição observada, é piso')
+
+  // O ticket anda: `ready-for-agent → claimed` (coluna `pronto → curso`). Agora o servidor
+  // **observou** a entrada na coluna nova — o `≥` some, e o `held.at` é o instante da transição.
+  await put('anda/issues/01-a.md', issue('01 — A', 'claimed'))
+  const depois = effortOf(await settle(), 'anda').issues[0]
+  assert.equal(depois.column, 'curso')
+  assert.equal(depois.held.floor, false, 'a transição foi observada: o piso virou fato')
+  // O contador reiniciou: a coluna nova começou **depois** da velha, não quando o ticket nasceu.
+  assert.ok(Date.parse(depois.held.at) > Date.parse(antes.held.at), 'a coluna nova começa depois da velha')
 })
 
-test('dois salvamentos do mesmo arquivo no mesmo dia não movem o hash — a quantização', async () => {
+test('reescrever o corpo sem mudar o `Status` NÃO move o `held` — o caso do Taiga', async () => {
+  // O bug que originou o redesenho: um toque tangencial no `.md` (o `Blocked by:` de outra
+  // issue, um typo, o resultado de outro ticket derramado no mesmo esforço) **zerava** o
+  // contador do `mtime`. A feature que revela o ticket parado era a que o apagava. O catálogo
+  // lê a transição de `Status:`, e o corpo não é transição nenhuma.
+  await put('taiga/issues/01-a.md', issue('01 — A', 'ready-for-agent'))
+  const before = effortOf(await settle(), 'taiga').issues[0].held.at
+
+  await put('taiga/issues/01-a.md', `Status: ready-for-agent\nType: task\n\n# 01 — A\n\nOutro corpo, o mesmo status.\n`)
+  const after = effortOf(await settle(), 'taiga').issues[0].held.at
+
+  assert.equal(after, before, 'o toque tangencial moveu o contador de coluna — o bug do Taiga voltou')
+})
+
+test('dois salvamentos do corpo não movem o hash — o `held` vem do catálogo, não do `mtime`', async () => {
   await put('carimbo/issues/01-a.md', issue('01 — A', 'ready-for-agent'))
-  await board() // absorve o nascimento: daqui em diante o `carimbo` é o esforço mais quente
+  await settle() // absorve o nascimento e a observação: daqui em diante o `carimbo` é o mais quente
 
   const stream = await openStream()
   try {
-    // Só o corpo muda, e o ticket **já é o primeiro** — nem a projeção nem o ranking se mexem.
-    // A única coisa que se move é o `mtime`, e é dele que o `touched` é derivado: publicá-lo
-    // cru faria cada um destes salvamentos arrastar o board inteiro (~71 KB) e um re-render.
+    // Só o corpo muda, o `Status:` não — então o catálogo não registra nada, o `held` fica
+    // imóvel, e o ticket **já é o primeiro** da ordem. Nem a projeção nem o ranking se mexem.
+    // Era o `touched` derivado do `mtime` que fazia cada salvamento arrastar o board inteiro.
     for (const n of [1, 2, 3]) {
       await put('carimbo/issues/01-a.md', `Status: ready-for-agent\nType: task\n\n# 01 — A\n\nParágrafo ${n}.\n`)
 
       const ev = await stream.next()
-      assert.equal(ev.event, 'files', `o salvamento ${n} repintou o board — o carimbo não está quantizado`)
+      assert.equal(ev.event, 'files', `o salvamento ${n} repintou o board — o \`held\` não devia ter mexido`)
       assert.equal('board' in ev, false)
     }
-  } finally {
-    stream.close()
-  }
-})
-
-test('mas tocar um arquivo PARADO HÁ DIAS empurra — o card dizia uma coisa e passa a dizer outra', async () => {
-  // O contraponto do "tocar no mesmo dia não empurra nada", lá em cima — e ele existe para que
-  // a fronteira entre os dois seja uma **decisão**, e não um acaso que alguém "conserta".
-  //
-  // Aquele teste passava por sorte antes deste ticket: sem carimbo no payload, **nenhum** toque
-  // empurrava. Agora o dia viaja, e a pergunta "conteúdo byte-idêntico pode empurrar o board?"
-  // tem uma resposta que precisa estar escrita: **pode, quando o dia vira.** O ticket dizia
-  // "parado há 5 dias" e passa a não dizer nada — a tela mudou de verdade, e o `message` é o
-  // evento certo. O que a quantização garante é o **teto**: uma vez por ticket por dia, e não
-  // uma vez por salvamento. O ocioso continua em zero byte, porque o carimbo é um fato do
-  // disco e não envelhece sozinho — quem prende isso é o `sweep.test.js`.
-  await put('toque/issues/01-a.md', issue('01 — A', 'ready-for-agent'))
-  await age('toque/issues/01-a.md', 5)
-  await board() // absorve o nascimento
-
-  const stream = await openStream()
-  try {
-    const agora = new Date()
-    await utimes(join(root, 'toque/issues/01-a.md'), agora, agora)
-
-    const ev = await stream.next()
-    assert.equal(ev.event, 'message', 'o dia virou: o card deixou de dizer "parado há 5 dias"')
-    assert.equal(effortOf(ev.board, 'toque').issues[0].touched, dayAgo(0))
   } finally {
     stream.close()
   }

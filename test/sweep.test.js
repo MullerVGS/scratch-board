@@ -144,15 +144,17 @@ test('num board parado, a varredura roda e NÃO emite nada', async () => {
 
 test('e o board com um ticket ENCALHADO continua mudo — o carimbo não envelhece sozinho', async () => {
   // O modo de falha que o eixo de tempo poderia introduzir, e a razão de ele existir aqui: um
-  // `"parado há 6 dias"` **calculado no servidor** é uma string que muda com o relógio. Ela
-  // sobreviveria a esta varredura, mas não à seguinte — e o board empurraria 71 KB e um
+  // `"em pronto há 6 dias"` **calculado no servidor** seria uma string que muda com o relógio.
+  // Ela sobreviveria a esta varredura, mas não à seguinte — e o board empurraria 71 KB e um
   // re-render **sozinho, parado**, sem ninguém ter escrito um byte. Seria o polling ressuscitado,
-  // e pior: barulhento. O que viaja é o dia em que o ticket parou, que não envelhece.
+  // e pior: barulhento. O que viaja é o **instante** em que o ticket entrou na coluna, imóvel:
+  // um carimbo de transição (aqui, o primeiro `seen`, que a subida semeou) não envelhece.
   const stream = await openStream()
   try {
     const { boards } = await (await fetch(`${base}/api/board`)).json()
     const frio = effortOf(boards.projetos, 'encalhado').issues[0]
-    assert.match(frio.touched, /^\d{4}-\d{2}-\d{2}$/, 'o card do encalhado tem que carregar o dia')
+    assert.match(frio.held.at, /^\d{4}-\d{2}-\d{2}T/, 'o card do encalhado tem que carregar o instante da coluna')
+    assert.equal(frio.held.floor, true, 'nunca observado transicionar: o número é um piso')
 
     await stream.silence(SWEEP * 4)
   } finally {

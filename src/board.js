@@ -14,9 +14,10 @@
 // supressão do push ser demonstrável em vez de prometida.
 //
 // **O `mtime` cru é lido aqui, e não sai daqui.** Ele ordena — os esforços e, dentro de cada
-// um, as issues, de modo que o trabalho quente suba —, e dele se deriva o **dia** em que cada
-// issue foi tocada (`touched`, no `dayOf()` abaixo). O que **nunca** atravessa o fio é o
-// carimbo bruto, e a distinção é a decisão central deste módulo:
+// um, as issues, de modo que o trabalho quente suba — e nada mais: *quando* o trabalho andou
+// não vem dele (ele mente, um toque tangencial o move), vem do **catálogo** — a transição de
+// `Status:` que o `history.js` persiste. O que **nunca** atravessa o fio é o carimbo bruto, e
+// a distinção é a decisão central deste módulo:
 //
 // (A ordem que sai daqui é a certa. O que a *tela* faz com ela é outra história: o kanban a
 // respeita, e a visão geral a quebra em seções — limitação assumida, escrita no `AGENTS.md`.)
@@ -30,9 +31,10 @@
 //   quando a tela reordena de verdade, um push legítimo. O agente salva o ticket X: ele sobe
 //   ao topo (um push), e os dez salvamentos seguintes não movem nada, porque ele já está em
 //   primeiro.
-// - **E publicar o *dia* também não**, pelo mesmo motivo com outra roupa: dez salvamentos de
-//   hoje dão o mesmo dia. O campo só se move quando o ticket atravessa a meia-noite e alguém
-//   o toca — um push por ticket por dia, no máximo, e a tela de fato mudou.
+// - **E o `held` de cada issue** — o instante em que ela entrou na coluna atual, que alimenta
+//   o `"em <coluna> há N"` do card — atravessa o fio, mas **não é o `mtime`**: é um carimbo de
+//   transição do catálogo, **imóvel** (dez salvamentos depois, o mesmo byte), como os `start` da
+//   barra do Gantt. Publicá-lo não move o hash; o relativo e a unidade são conta do navegador.
 //
 // Daí a forma das leituras abaixo: elas devolvem **`{ at, ... }`** — o carimbo *ao lado* do
 // documento, nunca dentro dele. A garantia deixa de ser uma regra que alguém precisa lembrar
@@ -144,28 +146,13 @@ async function readStamped(path) {
 }
 
 /**
- * O **dia** em que o documento foi tocado, e é este o único carimbo que atravessa o fio.
+ * O **dia UTC** de um instante. É a granularidade do **cerco** do esforço no Gantt — o
+ * `created`/`ended` derivados do `birthtime`/`ctime` do diretório (ver `readEffort`).
  *
- * Ele existe para o `"parado há N dias"` do card, e as duas metades do nome são a defesa:
- *
- * - **Dia**, e não instante. O `mtime` cru muda a *cada* salvamento do agente — publicá-lo
- *   moveria o hash toda vez e o evento viraria `message` (~71 KB + re-render) em vez do
- *   `files` (~126 bytes), colapsando as duas supressões. Quantizado, dez salvamentos de hoje
- *   dão o mesmo valor: o campo não se move, o hash não se move. **A quantização não é uma
- *   concessão — é a granularidade certa**: a precisão que "ticket velho" pede *é* dia.
- * - **Absoluto**, e não relativo. O `"há 6 dias"` é conta do navegador (`public/issues.js`).
- *   Uma string relativa mudaria **com o relógio**: a varredura de 90s a recalcularia, o hash
- *   se moveria, e o board empurraria sozinho, parado, para sempre — o polling ressuscitado, e
- *   pior, barulhento sem ninguém ter escrito nada.
- *
- * E o **limiar** — a partir de quantos dias o rótulo aparece — mora no cliente pela mesma
- * razão: se o corte fosse aqui, um ticket cruzando os três dias **à meia-noite** mudaria o
- * payload sem ninguém ter tocado no disco, e a varredura seguinte empurraria o board inteiro.
- * O servidor publica o fato; quem envelhece é o relógio de quem olha.
- *
- * Ele viaja em **todas** as issues, inclusive nas fechadas — nelas o `mtime` é a resolução, e
- * é um fato como qualquer outro. Quem decide que uma issue fechada não está "parada" é o
- * rótulo, no cliente.
+ * O dia é a precisão certa ali ("quando o esforço rodou") e é o que mantém o campo estável no
+ * fio: o `ctime` de um arquivado pode escorregar (um `chmod`, um restore), mas não em
+ * granularidade de dia. O *quando o trabalho andou* — fino, ao minuto — não vem daqui; vem do
+ * catálogo, via `projectColumnEntry` e `projectBar`.
  */
 const dayOf = (at) => new Date(at).toISOString().slice(0, 10)
 
@@ -197,12 +184,57 @@ function projectBar(observations) {
   return { measured: true, segments }
 }
 
+/**
+ * O **tempo na coluna atual** (`issue.held`), destilado do catálogo — o fato absoluto de que o
+ * card diz `"em <coluna> há N"`. Substitui o `"parado há N dias"` que lia o `mtime` e que um
+ * toque tangencial zerava: aqui só a **transição de `Status:`** move o contador, então ele
+ * responde a *"quando o trabalho andou"* em vez de *"quando o arquivo foi tocado"*.
+ *
+ * Devolve `{ at, floor }`:
+ *
+ * - **`at`** — o instante ISO em que o ticket entrou na coluna atual, ou `null` quando o
+ *   catálogo ainda não sabe: volume perdido, ou uma transição recém-escrita cuja observação
+ *   ainda não rodou (a leitura vem *antes* do `observe()` no mesmo `sync()` — a retaguarda de
+ *   um ciclo que o `AGENTS.md` documenta). Nesse caso o card cala, em vez de rotular o tempo da
+ *   coluna velha com o nome da nova.
+ * - **`floor`** — `true` quando o servidor **nunca viu** o ticket entrar nessa coluna, só o
+ *   encontrou já nela (o primeiro `seen` abriu a trilha aqui): o `at` é um **piso**
+ *   (`"há ≥N"`), não um fato, e o viés está no lado seguro — subestima o encalhe, nunca o
+ *   esconde. Vira `false` no instante em que uma transição observada preencher a coluna atual.
+ *
+ * O `at` é **imóvel** (um instante de transição ou de primeiro-encontro, persistido no log e
+ * relido igual), então atravessa o fio sem ferir a supressão — como os `start` da barra, e ao
+ * contrário do `mtime`. O relativo, a unidade e o limiar são conta do navegador.
+ */
+function projectColumnEntry(observations, currentColumn) {
+  // As colunas percorridas, mescladas — uma transição **dentro** da mesma coluna
+  // (`ready-for-agent → ready-for-human`) não abre faixa nem reinicia o contador.
+  const runs = []
+  for (const { status, at } of observations) {
+    const column = columnOf(status)
+    if (runs.at(-1)?.column === column) continue
+    runs.push({ column, start: at })
+  }
+  const last = runs.at(-1)
+  // O catálogo pode estar um ciclo atrás de uma transição recém-escrita: a última faixa
+  // observada não é a coluna atual do arquivo. O honesto é calar até o próximo ciclo preenchê-la.
+  if (!last || last.column !== currentColumn) return { at: null, floor: false }
+  // Piso quando a coluna atual é a **primeira** que o servidor viu: ele não observou a entrada
+  // nela, só a encontrou já lá. Uma coluna alcançada por transição (`runs.length > 1`) é fato.
+  return { at: last.start, floor: runs.length === 1 }
+}
+
 async function readIssue(ns, effortSlug, dir, file, history) {
   const path = join(dir, file)
   const { raw, at } = await readStamped(path)
   const { header, title } = parseDoc(raw)
   const status = normalizeStatus(header.status)
+  const column = columnOf(status)
   const number = /^(\d+)/.exec(file)?.[1] ?? ''
+  // Uma leitura do catálogo, dois consumidores. Sem catálogo (volume perdido, ou um contexto
+  // que não o passa), `observations()` devolve `[]` — a barra nasce hachurada e o `held` nasce
+  // sem instante: a degradação honesta que o PRD exige. Perder o volume degrada, não zera.
+  const obs = history?.observations(ns.name, effortSlug, number) ?? []
   return {
     at,
     issue: {
@@ -210,20 +242,18 @@ async function readIssue(ns, effortSlug, dir, file, history) {
       path,
       ref: refIn(ns, path),
       id: `${effortSlug}/${file}`,
-      touched: dayOf(at),
       number,
       title: title ?? file.replace(/\.md$/, ''),
       status,
       closed: isClosed(status),
-      column: columnOf(status),
+      column,
       type: header.type ?? null,
       repo: header.repo ?? null,
       blockedBy: parseBlockedBy(header['blocked by']),
-      // A projeção do catálogo para o Gantt. Sem catálogo (volume perdido, ou um contexto que
-      // não o passa), `observations()` devolve `[]` e a barra nasce hachurada — a degradação
-      // honesta que o PRD exige: perder o volume não zera o Gantt, só recolhe as barras ao
-      // cerco do disco.
-      bar: projectBar(history?.observations(ns.name, effortSlug, number) ?? []),
+      // O tempo na coluna atual (`held`, o `"em <coluna> há N"`) e a barra do Gantt — os dois
+      // fatos que o catálogo destila, e que substituem o `mtime` como eixo de tempo.
+      held: projectColumnEntry(obs, column),
+      bar: projectBar(obs),
     },
   }
 }
