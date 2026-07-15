@@ -26,8 +26,8 @@
  */
 import { depsOf } from './issues.js'
 
-export const LABEL_W = 220
-export const BAR_H = 26
+export const LABEL_W = 280
+export const BAR_H = 30
 export const ROW_GAP = 10
 export const PAD = 18
 export const AXIS_H = 26
