@@ -13,6 +13,32 @@
   position: relative;
 }
 
+.gantt-layers {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-bottom: 8px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.gantt-layers button {
+  padding: 3px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.gantt-layers button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+}
+
 /* ---------- o eixo de datas ---------- */
 
 .gtick {
@@ -117,6 +143,7 @@
   cursor: pointer;
   overflow: hidden; /* as faixas por coluna se recortam no `border-radius` da barra */
   transition: border-color 0.12s;
+  touch-action: none;
 }
 
 .gbar:hover {
@@ -133,6 +160,57 @@
 
 .gbar.is-parent.is-toggle {
   cursor: pointer;
+}
+
+/* Medido e confirmado coexistem. Em "ambos", ocupam meia linha cada; sem confirmação a
+   medida conserva a altura inteira, para a ausência não parecer uma barra microscópica. */
+.gbar.is-confirmed {
+  border-color: color-mix(in srgb, var(--amber) 62%, var(--line));
+  background: color-mix(in srgb, var(--amber) 24%, var(--panel-2));
+  z-index: 3;
+}
+
+.gantt-view[data-layer="measured"] .gbar.is-confirmed,
+.gantt-view[data-layer="confirmed"] .gbar.is-measured {
+  display: none;
+}
+
+/* O cercado é fallback, não uma terceira camada para empilhar. Quando há confirmação, ela
+   estreita a incerteza até sólido; "ambos" só empilha quando existe medição de verdade. */
+.gantt-view[data-layer="both"] .gbar.is-measured.is-confirmed-fallback {
+  display: none;
+}
+
+.gantt-view[data-layer="both"] .gbar.is-measured.has-confirmed {
+  height: calc(var(--row-h) / 2 - 1px) !important;
+}
+
+.gantt-view[data-layer="both"] .gbar.is-confirmed.has-confirmed {
+  top: calc(var(--row-y) + var(--row-h) / 2 + 1px) !important;
+  height: calc(var(--row-h) / 2 - 1px) !important;
+}
+
+.gdrag-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 2;
+  cursor: ew-resize;
+}
+
+.gdrag-left { left: 0; }
+.gdrag-right { right: 0; }
+
+.gbar:hover .gdrag-handle::after,
+.gbar:focus-visible .gdrag-handle::after {
+  content: '';
+  position: absolute;
+  top: 22%;
+  bottom: 22%;
+  left: 3px;
+  border-left: 1px solid currentColor;
+  opacity: 0.75;
 }
 
 .gbar.is-blocked {

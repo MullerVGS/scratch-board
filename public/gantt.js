@@ -11,6 +11,7 @@ import { openIssue } from './drawer.js'
 import { boardOf } from './state.js'
 import { view, crumbs, tally } from './shell.js'
 import { fleetSwitch } from './overview.js'
+import { draggableConfirmation } from './confirm.js'
 
 const HOUR = 3600e3
 const DAY = 864e5
@@ -24,6 +25,49 @@ const ddmm = (ms) => `${iso(ms).slice(8, 10)}/${iso(ms).slice(5, 7)}`
 const hh = (ms) => `${iso(ms).slice(11, 13)}h`
 const dayMs = (day) => Date.parse(`${day}T00:00:00-03:00`)
 const tickLabel = (at, step) => (step >= DAY || (at + BR) % DAY === 0 ? ddmm(at) : hh(at))
+
+const rowStyle = ({ x, w }, y) =>
+  `left:${x}px; top:${y}px; width:${w}px; height:${BAR_H}px; --row-y:${y}px; --row-h:${BAR_H}px`
+
+function layerSwitch(host) {
+  const controls = el(`
+    <div class="gantt-layers" role="group" aria-label="Camadas da linha do tempo">
+      <span>camada</span>
+      <button type="button" data-layer="measured">medido</button>
+      <button type="button" data-layer="confirmed">confirmado</button>
+      <button type="button" data-layer="both" aria-pressed="true">ambos</button>
+    </div>
+  `)
+  for (const button of controls.querySelectorAll('button')) {
+    button.onclick = () => {
+      host.dataset.layer = button.dataset.layer
+      for (const peer of controls.querySelectorAll('button')) {
+        peer.setAttribute('aria-pressed', String(peer === button))
+      }
+    }
+  }
+  return controls
+}
+
+const targetOf = (group, number) => ({
+  ns: group.effort.ns,
+  slug: group.effort.slug,
+  ...(number === undefined ? {} : { number }),
+})
+
+function confirmedBar(range, y, { className = '', title, pxPerMs, target, onClick }) {
+  const rect = el(`
+    <div class="gbar is-confirmed ${className}" style="${rowStyle(range, y)}"
+         title="${esc(title)}"></div>
+  `)
+  draggableConfirmation(rect, {
+    range: { start: range.start, end: range.end },
+    pxPerMs,
+    target,
+    onClick,
+  })
+  return rect
+}
 
 function humanDur(ms) {
   const min = Math.round(ms / 60e3)
@@ -66,10 +110,12 @@ function entry(effort, archived, now) {
 
 /** Desenha os dois escopos sem bifurcar a tela: só mudam grupos, escala e estado expandido. */
 function renderTimeline(groups, { pxPerMs, tickEvery, expanded, onToggle, centerToday = false }) {
+  const host = el('<section class="gantt-view" data-layer="both"></section>')
   const wrap = el('<div class="gantt"></div>')
   if (!groups.length) {
     wrap.append(el('<p class="empty">Nenhum esforço — não há linha do tempo a desenhar.</p>'))
-    return wrap
+    host.append(wrap)
+    return host
   }
 
   const now = Date.now()
@@ -108,14 +154,28 @@ function renderTimeline(groups, { pxPerMs, tickEvery, expanded, onToggle, center
       </div>
     `)
     const rect = el(`
-      <div class="gbar is-parent ${toggleClass}" style="left:${parent.x}px; top:${parent.y}px; width:${parent.w}px; height:${BAR_H}px"
+      <div class="gbar is-parent is-measured ${parent.confirmed ? 'has-confirmed' : ''} ${toggleClass}" style="${rowStyle(parent, parent.y)}"
            title="${esc(parentTitle(parent))}"></div>
     `)
     if (interactive) {
       pressable(label, () => onToggle(group.id))
-      pressable(rect, () => onToggle(group.id))
     }
+    draggableConfirmation(rect, {
+      range: { start: parent.start, end: parent.end },
+      pxPerMs,
+      target: targetOf(group),
+      onClick: interactive ? () => onToggle(group.id) : undefined,
+    })
     canvas.append(label, rect)
+    if (parent.confirmed) {
+      canvas.append(confirmedBar(parent.confirmed, parent.y, {
+        className: 'is-parent has-confirmed',
+        title: `confirmado · ${ddmm(parent.confirmed.start)} ${hh(parent.confirmed.start)} → ${ddmm(parent.confirmed.end)} ${hh(parent.confirmed.end)}`,
+        pxPerMs,
+        target: targetOf(group),
+        onClick: interactive ? () => onToggle(group.id) : undefined,
+      }))
+    }
   }
 
   for (const bar of bars) {
@@ -127,8 +187,8 @@ function renderTimeline(groups, { pxPerMs, tickEvery, expanded, onToggle, center
       </div>
     `)
     const rect = el(`
-      <div class="gbar ${bar.kind === 'hatched' ? 'is-hatched' : ''} ${issue.closed ? 'is-closed' : ''} ${bar.open ? 'is-open' : ''} ${issue.blocked ? 'is-blocked' : ''}"
-           style="left:${bar.x}px; top:${bar.y}px; width:${bar.w}px; height:${BAR_H}px"
+      <div class="gbar is-measured ${bar.confirmed && bar.kind !== 'hatched' ? 'has-confirmed' : ''} ${bar.confirmed && bar.kind === 'hatched' ? 'is-confirmed-fallback' : ''} ${bar.kind === 'hatched' ? 'is-hatched' : ''} ${issue.closed ? 'is-closed' : ''} ${bar.open ? 'is-open' : ''} ${issue.blocked ? 'is-blocked' : ''}"
+           style="${rowStyle(bar, bar.y)}"
            title="${esc(barTitle(bar))}"></div>
     `)
     for (const segment of bar.segments) {
@@ -136,8 +196,22 @@ function renderTimeline(groups, { pxPerMs, tickEvery, expanded, onToggle, center
       rect.append(el(`<div class="gseg is-${esc(segment.column)}" style="left:${segment.x - bar.x}px; width:${segment.w}px"></div>`))
     }
     pressable(label, () => openIssue(issue, group.effort, group.archived))
-    pressable(rect, () => openIssue(issue, group.effort, group.archived))
+    draggableConfirmation(rect, {
+      range: { start: bar.start, end: bar.end },
+      pxPerMs,
+      target: targetOf(group, issue.number),
+      onClick: () => openIssue(issue, group.effort, group.archived),
+    })
     canvas.append(label, rect)
+    if (bar.confirmed) {
+      canvas.append(confirmedBar(bar.confirmed, bar.y, {
+        className: `${bar.kind === 'hatched' ? '' : 'has-confirmed'} ${issue.closed ? 'is-closed' : ''}`,
+        title: `confirmado · ${ddmm(bar.confirmed.start)} ${hh(bar.confirmed.start)} → ${ddmm(bar.confirmed.end)} ${hh(bar.confirmed.end)}`,
+        pxPerMs,
+        target: targetOf(group, issue.number),
+        onClick: () => openIssue(issue, group.effort, group.archived),
+      }))
+    }
   }
 
   const edges = svg('svg', { class: 'gantt-edges', width, height })
@@ -156,7 +230,8 @@ function renderTimeline(groups, { pxPerMs, tickEvery, expanded, onToggle, center
       el('<p class="viewnote">Barra hachurada = o servidor nunca viu este ticket transicionar; o disco só garante que ele viveu dentro do esforço.</p>'),
     )
   }
-  return wrap
+  host.append(layerSwitch(host), wrap)
+  return host
 }
 
 /** A terceira aba do esforço usa a mesma timeline, com um grupo que nasce expandido. */

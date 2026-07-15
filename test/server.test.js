@@ -30,7 +30,7 @@
  */
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rename, rm, utimes } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, stat, writeFile, rename, rm, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -813,4 +813,149 @@ test('o `created` sobrevive ao arquivamento, e o arquivado ganha `ended` — o `
   const arquivado = b.archived.find((e) => e.slug === 'efemero')
   assert.equal(arquivado.created, nascido, 'arquivar não pode apagar a data de criação')
   assert.match(arquivado.ended, /^\d{4}-\d{2}-\d{2}$/, 'o esforço arquivado ganha um fim de disco (o ctime do mv)')
+})
+
+// ---------------------------------------------------------------------------
+// A confirmação: o passado lembrado entra no catálogo, nunca no `.md`
+// ---------------------------------------------------------------------------
+
+test('POST /api/confirm soma uma confirmação horária sem apagar a medição nem tocar no ticket', async () => {
+  const rel = 'confirmado/issues/01-a.md'
+  const body = issue('01 — A', 'claimed')
+  const path = await put(rel, body)
+
+  // Primeiro encontro e depois uma transição real: a barra já tem uma camada medida que a
+  // confirmação não pode sobrescrever.
+  await board()
+  await put(rel, issue('01 — A', 'resolved'))
+  await board()
+  const measuredBefore = (await readFile(join(hist, 'history.jsonl'), 'utf8'))
+    .split('\n')
+    .filter(Boolean)
+    .map(JSON.parse)
+    .filter((ev) => ev.src === 'medido' && ev.e === 'confirmado' && ev.n === '01')
+  assert.ok(measuredBefore.some((ev) => ev.kind === 'move'), 'o cenário precisa ter uma medição para preservar')
+  assert.ok(
+    measuredBefore.some((ev) => ev.kind === 'move' && !ev.before.endsWith(':00:00.000Z')),
+    'a medição conserva segundos/milissegundos; só a lembrança é encaixada na hora',
+  )
+
+  const mdBefore = await readFile(path, 'utf8')
+  const mtimeBefore = (await stat(path, { bigint: true })).mtimeNs
+  const res = await fetch(`${base}/api/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ns: 'projetos',
+      slug: 'confirmado',
+      number: '01',
+      start: '2026-06-03T13:27:41.000Z',
+      end: '2026-06-03T17:42:19.000Z',
+    }),
+  })
+  assert.equal(res.status, 200)
+
+  const lines = (await readFile(join(hist, 'history.jsonl'), 'utf8'))
+    .split('\n')
+    .filter(Boolean)
+    .map(JSON.parse)
+  const confirmed = lines.filter((ev) => ev.src === 'confirmado' && ev.e === 'confirmado' && ev.n === '01')
+  assert.equal(confirmed.length, 1, 'confirmar soma uma linha — não reescreve o log')
+  assert.equal(confirmed[0].start, '2026-06-03T13:00:00.000Z')
+  assert.equal(confirmed[0].end, '2026-06-03T18:00:00.000Z')
+  assert.deepEqual(
+    lines.filter((ev) => ev.src === 'medido' && ev.e === 'confirmado' && ev.n === '01'),
+    measuredBefore,
+    'a camada medida continua byte a byte no mesmo log',
+  )
+
+  const projected = effortOf(await board(), 'confirmado').issues.find((i) => i.number === '01')
+  assert.equal(projected.bar.measured, true)
+  assert.deepEqual(projected.bar.confirmed, {
+    start: '2026-06-03T13:00:00.000Z',
+    end: '2026-06-03T18:00:00.000Z',
+  })
+  assert.equal(await readFile(path, 'utf8'), mdBefore, 'a rota de escrita não toca no `.scratch/`')
+  assert.equal((await stat(path, { bigint: true })).mtimeNs, mtimeBefore, 'nem o carimbo do `.md` se move')
+})
+
+test('reconfirmar mantém o histórico e só a última lembrança vence na projeção', async () => {
+  const res = await fetch(`${base}/api/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ns: 'projetos',
+      slug: 'confirmado',
+      number: '01',
+      start: '2026-06-04T09:00:00.000Z',
+      end: '2026-06-04T12:00:00.000Z',
+    }),
+  })
+  assert.equal(res.status, 200)
+
+  const lines = (await readFile(join(hist, 'history.jsonl'), 'utf8'))
+    .split('\n')
+    .filter(Boolean)
+    .map(JSON.parse)
+    .filter((ev) => ev.src === 'confirmado' && ev.e === 'confirmado' && ev.n === '01')
+  assert.equal(lines.length, 2, 'a primeira lembrança continua legível no log')
+
+  const projected = effortOf(await board(), 'confirmado').issues.find((i) => i.number === '01')
+  assert.deepEqual(projected.bar.confirmed, {
+    start: '2026-06-04T09:00:00.000Z',
+    end: '2026-06-04T12:00:00.000Z',
+  })
+})
+
+test('a mesma rota confirma a barra-pai quando o alvo não tem número', async () => {
+  const res = await fetch(`${base}/api/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ns: 'projetos',
+      slug: 'confirmado',
+      start: '2026-06-01T08:00:00.000Z',
+      end: '2026-06-05T18:00:00.000Z',
+    }),
+  })
+  assert.equal(res.status, 200)
+
+  const effort = effortOf(await board(), 'confirmado')
+  assert.deepEqual(effort.confirmed, {
+    start: '2026-06-01T08:00:00.000Z',
+    end: '2026-06-05T18:00:00.000Z',
+  })
+  const line = (await readFile(join(hist, 'history.jsonl'), 'utf8'))
+    .split('\n')
+    .filter(Boolean)
+    .map(JSON.parse)
+    .find((ev) => ev.src === 'confirmado' && ev.e === 'confirmado' && ev.n === undefined)
+  assert.ok(line, 'a confirmação do esforço vive no mesmo log, distinguida pela ausência de número')
+})
+
+test('confirmar um ticket nunca observado estreita o cerco até uma camada sólida', async () => {
+  await put('cercado/issues/01-antigo.md', issue('01 — Antigo', 'resolved'))
+  const before = effortOf(await board(), 'cercado').issues[0]
+  assert.equal(before.bar.measured, false, 'primeiro encontro é cerco, não medição inventada')
+  assert.equal(before.bar.confirmed, null)
+
+  const res = await fetch(`${base}/api/confirm`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ns: 'projetos',
+      slug: 'cercado',
+      number: '01',
+      start: '2026-06-10T14:00:00.000Z',
+      end: '2026-06-10T18:00:00.000Z',
+    }),
+  })
+  assert.equal(res.status, 200)
+
+  const after = effortOf(await board(), 'cercado').issues[0]
+  assert.equal(after.bar.measured, false, 'confirmar não fabrica observação do servidor')
+  assert.deepEqual(after.bar.confirmed, {
+    start: '2026-06-10T14:00:00.000Z',
+    end: '2026-06-10T18:00:00.000Z',
+  })
 })

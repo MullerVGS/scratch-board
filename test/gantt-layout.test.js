@@ -260,6 +260,20 @@ describe('o Gantt global agrupa esforços sem inventar outro eixo', () => {
     }
   })
 
+  test('confirmar fora do cerco amplia o eixo, nunca a camada medida da barra-pai', () => {
+    const [baseline] = groupedGanttLayout([group('alpha', issues())], { now: NOW, pxPerMs: DAY_PX }).parents
+    const alpha = group('alpha', issues())
+    alpha.effort.confirmed = { start: at(T0 - 20 * DAY), end: at(T0 - 10 * DAY) }
+    alpha.effort.issues[0].bar.confirmed = { start: at(T0 - 15 * DAY), end: at(T0 - 12 * DAY) }
+
+    const withConfirmation = groupedGanttLayout([alpha], { now: NOW, pxPerMs: DAY_PX })
+    const [parent] = withConfirmation.parents
+    assert.equal(parent.start, FLOOR.start, 'a lembrança não muda o início medido')
+    assert.equal(parent.end, FLOOR.end, 'a lembrança não muda o fim medido')
+    assert.equal(parent.w, baseline.w, 'a largura medida conserva o mesmo cerco de antes da lembrança')
+    assert.ok(parent.confirmed.x < parent.x, 'a camada confirmada ainda cabe no eixo, separada da medida')
+  })
+
   test('as setas das issues expandidas são as mesmas do layout filtrado', () => {
     const children = issues()
     const filtered = ganttLayout(children, numberIndex(children), {

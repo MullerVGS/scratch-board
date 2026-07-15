@@ -80,6 +80,13 @@ export async function createHistory(dir = HISTORY) {
    */
   const trail = new Map()
 
+  /**
+   * A última lembrança confirmada por alvo. O log continua guardando **todas**; este mapa é
+   * só a projeção que o board lê, e por isso uma segunda confirmação vence sem apagar a
+   * primeira. Para esforço, `number` é ausente e a mesma chave termina vazia.
+   */
+  const confirmed = new Map()
+
   // O `seen` **abre** a trilha (é o primeiro encontro, uma vez por ticket); o `move` a
   // **estende**. Um `move` antes de qualquer `seen` não acontece — o servidor sempre vê o
   // ticket parado antes de vê-lo andar —, mas se o log estiver assim, a trilha começa nele
@@ -123,6 +130,10 @@ export async function createHistory(dir = HISTORY) {
       // A faixa da coluna nova começa quando eu a **confirmei** — o `before` —, não quando o
       // ticket saiu da anterior (o `after`, que pode ser uma janela larga através de um restart).
       extend(key, ev.to, ev.before)
+      return
+    }
+    if (ev.kind === 'confirm' && ev.src === 'confirmado') {
+      confirmed.set(keyOf(ev.ns, ev.e, ev.n), { start: ev.start, end: ev.end })
     }
   }
 
@@ -235,8 +246,35 @@ export async function createHistory(dir = HISTORY) {
   const observations = (ns, slug, number) =>
     (trail.get(keyOf(ns, slug, number)) ?? []).map((o) => ({ ...o }))
 
+  /**
+   * Soma uma lembrança ao mesmo JSONL das observações. O append acontece antes da memória:
+   * se o disco recusar a escrita, a projeção não pode afirmar uma confirmação que não durou.
+   */
+  async function confirm(ns, slug, number, start, end, now) {
+    const ev = {
+      src: 'confirmado',
+      kind: 'confirm',
+      ns,
+      e: slug,
+      ...(number === undefined ? {} : { n: number }),
+      start,
+      end,
+      at: iso(now),
+    }
+    await append(ev)
+    confirmed.set(keyOf(ns, slug, number), { start, end })
+    return { start, end }
+  }
+
+  const confirmation = (ns, slug, number) => {
+    const range = confirmed.get(keyOf(ns, slug, number))
+    return range ? { ...range } : null
+  }
+
   return {
     observe,
+    confirm,
+    confirmation,
     of,
     observations,
     // Devolve a string ISO do último batimento, ou `null` se não houver.

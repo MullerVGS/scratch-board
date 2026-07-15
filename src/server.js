@@ -38,6 +38,8 @@ const SHARED = resolve(import.meta.dirname, '..', 'shared')
 
 /** Um arquivo grande ou binário não vai para a gaveta; só o fato de existir importa. */
 const TEXT_LIMIT = 512 * 1024
+const JSON_LIMIT = 16 * 1024
+const HOUR = 3600e3
 
 /** Um comentário SSE de tempos em tempos: mantém o socket vivo e denuncia o que morreu. */
 const PING_MS = 30_000
@@ -68,6 +70,23 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 const send = (res, code, body, type = 'application/json') => {
   res.writeHead(code, { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' })
   res.end(typeof body === 'string' ? body : JSON.stringify(body))
+}
+
+/** Corpo JSON pequeno das rotas de comando. O limite impede um POST de virar buffer sem teto. */
+async function jsonBody(req) {
+  let body = ''
+  for await (const chunk of req) {
+    body += chunk
+    if (body.length > JSON_LIMIT) throw new Error('corpo grande demais')
+  }
+  return JSON.parse(body || '{}')
+}
+
+/** Memória tem granularidade de hora. O servidor reafirma o snap — não confia só no mouse. */
+const hourIso = (value) => {
+  const at = Date.parse(value)
+  if (!Number.isFinite(at)) throw new Error('data inválida')
+  return new Date(Math.round(at / HOUR) * HOUR).toISOString()
 }
 
 /**
@@ -245,6 +264,37 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
     const url = new URL(req.url, 'http://localhost')
     try {
       if (url.pathname === '/api/board') return send(res, 200, await syncAll())
+
+      if (url.pathname === '/api/confirm' && req.method === 'POST') {
+        const { ns, slug, number, start, end } = await jsonBody(req)
+        if (typeof ns !== 'string' || typeof slug !== 'string' || !ns || !slug) {
+          throw new Error('origem e esforço são obrigatórios')
+        }
+        if (number !== undefined && (typeof number !== 'string' || !number)) {
+          throw new Error('número inválido')
+        }
+        const wire = wires.get(ns)
+        if (!wire) throw new Error('origem não encontrada')
+
+        // A rota só confirma o que a projeção conhece. Isso também distingue issue de esforço
+        // sem aceitar caminho do cliente — a identidade é namespace + slug + número.
+        const current = await buildBoard(wire.ns, history)
+        const effort = [...current.efforts, ...current.archived].find((item) => item.slug === slug)
+        if (!effort) throw new Error('esforço não encontrado')
+        if (number !== undefined && !effort.issues.some((issue) => issue.number === number)) {
+          throw new Error('issue não encontrada')
+        }
+
+        const snappedStart = hourIso(start)
+        const snappedEnd = hourIso(end)
+        if (Date.parse(snappedStart) > Date.parse(snappedEnd)) throw new Error('intervalo invertido')
+        const confirmation = await history.confirm(ns, slug, number, snappedStart, snappedEnd, Date.now())
+
+        // O catálogo vive fora do `.scratch/`, então watcher nenhum acordará. A própria rota
+        // sincroniza e empurra a projeção nova às abas; o POST não deixa a confirmação muda.
+        await sync(ns)
+        return send(res, 200, { confirmation })
+      }
 
       if (url.pathname === '/api/stream') {
         res.writeHead(200, {

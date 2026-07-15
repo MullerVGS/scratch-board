@@ -173,15 +173,15 @@ const dayOf = (at) => new Date(at).toISOString().slice(0, 10)
  * ao contrário do `mtime`. O fim da barra (a resolução, ou "hoje" do ticket aberto) é conta do
  * cliente: o último `at` já diz quando fechou, e "hoje" envelhece no relógio de quem olha.
  */
-function projectBar(observations) {
-  if (observations.length <= 1) return { measured: false }
+function projectBar(observations, confirmed) {
+  if (observations.length <= 1) return { measured: false, confirmed }
   const segments = []
   for (const { status, at } of observations) {
     const column = columnOf(status)
     if (segments.at(-1)?.column === column) continue
     segments.push({ column, start: at })
   }
-  return { measured: true, segments }
+  return { measured: true, segments, confirmed }
 }
 
 /**
@@ -235,6 +235,7 @@ async function readIssue(ns, effortSlug, dir, file, history) {
   // que não o passa), `observations()` devolve `[]` — a barra nasce hachurada e o `held` nasce
   // sem instante: a degradação honesta que o PRD exige. Perder o volume degrada, não zera.
   const obs = history?.observations(ns.name, effortSlug, number) ?? []
+  const confirmed = history?.confirmation(ns.name, effortSlug, number) ?? null
   return {
     at,
     issue: {
@@ -253,7 +254,7 @@ async function readIssue(ns, effortSlug, dir, file, history) {
       // O tempo na coluna atual (`held`, o `"em <coluna> há N"`) e a barra do Gantt — os dois
       // fatos que o catálogo destila, e que substituem o `mtime` como eixo de tempo.
       held: projectColumnEntry(obs, column),
-      bar: projectBar(obs),
+      bar: projectBar(obs, confirmed),
     },
   }
 }
@@ -349,6 +350,9 @@ export async function readEffort(ns, root, slug, history, archived = false) {
       // disco em que as barras hachuradas (tickets nunca observados) se inscrevem — e a borda
       // direita da barra-pai no Gantt global.
       ended,
+      // A barra-pai também pode carregar a lembrança do Arthur. É outra camada: o cerco de
+      // disco (`created`/`ended`) permanece intacto e a confirmação nunca o sobrescreve.
+      confirmed: history?.confirmation(ns.name, slug) ?? null,
       docs,
       title: lede?.title ?? null,
       blurb: lede?.blurb ?? '',

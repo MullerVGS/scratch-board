@@ -95,6 +95,14 @@ function spanOf(issue, floor, now) {
   return { start, end, kind: 'hatched', segments: [] }
 }
 
+/** Uma lembrança confirmada é uma segunda camada, nunca uma substituição da medida. */
+const confirmedSpan = (range) => {
+  if (!range) return null
+  const start = ms(range.start)
+  const end = ms(range.end)
+  return Number.isFinite(start) && Number.isFinite(end) ? { start, end: Math.max(start, end) } : null
+}
+
 /**
  * As linhas contam a história na ordem em que ela aconteceu: quem fechou primeiro vem
  * primeiro, e as abertas — que correm até hoje — afundam para o fim. No empate, fechada antes
@@ -182,8 +190,19 @@ export function ganttLayout(issues, byNumber, { now, pxPerMs, floor, tickEvery, 
 
   // `domain` alinha vários esforços no mesmo eixo sem mudar a geometria interna de nenhum deles.
   // É a costura do Gantt global: cada grupo conserva seu próprio cerco, mas todos compartilham X.
-  const minTime = Math.min(domain?.start ?? Infinity, cercoStart, ...[...spans.values()].map((s) => s.start))
-  const maxTime = Math.max(domain?.end ?? -Infinity, cercoEnd, ...[...spans.values()].map((s) => s.end))
+  const confirmations = issues.map((issue) => confirmedSpan(issue.bar?.confirmed)).filter(Boolean)
+  const minTime = Math.min(
+    domain?.start ?? Infinity,
+    cercoStart,
+    ...[...spans.values()].map((s) => s.start),
+    ...confirmations.map((s) => s.start),
+  )
+  const maxTime = Math.max(
+    domain?.end ?? -Infinity,
+    cercoEnd,
+    ...[...spans.values()].map((s) => s.end),
+    ...confirmations.map((s) => s.end),
+  )
   const axis = axisGeometry(minTime, maxTime, { now, pxPerMs, tickEvery, axisPad })
   const { x } = axis
 
@@ -202,6 +221,12 @@ export function ganttLayout(issues, byNumber, { now, pxPerMs, floor, tickEvery, 
       open: !issue.closed,
       // As faixas por coluna, já em pixels — o `gantt.js` só as pinta. Vazio na barra hachurada.
       segments: s.segments.map((seg) => ({ column: seg.column, x: x(seg.start), w: (seg.end - seg.start) * pxPerMs })),
+      confirmed: (() => {
+        const range = confirmedSpan(issue.bar?.confirmed)
+        return range
+          ? { ...range, x: x(range.start), w: Math.max((range.end - range.start) * pxPerMs, MIN_BAR_W) }
+          : null
+      })(),
     }
   })
   const barOf = new Map(bars.map((b) => [b.issue, b]))
@@ -268,14 +293,21 @@ export function groupedGanttLayout(groups, { now, pxPerMs, expanded = [], tickEv
   const prepared = groups.map((group) => {
     const floor = group.floor ?? { start: now, end: now }
     const spans = group.effort.issues.map((issue) => spanOf(issue, floor, now))
-    // A pai é o resumo do grupo: deve conter toda filha, inclusive diante de dado contraditório.
-    const start = Math.min(floor.start, ...spans.map((s) => s.start))
-    const end = Math.max(start, floor.end, ...spans.map((s) => s.end))
-    return { ...group, floor, spans, start, end }
+    const confirmations = [
+      confirmedSpan(group.effort.confirmed),
+      ...group.effort.issues.map((issue) => confirmedSpan(issue.bar?.confirmed)),
+    ].filter(Boolean)
+    // A camada medida da pai continua sendo só disco + fatos medidos. Confirmação pode ampliar
+    // o **domínio do eixo**, mas nunca esta barra: senão uma lembrança adulteraria o fato.
+    const measuredStart = Math.min(floor.start, ...spans.map((s) => s.start))
+    const measuredEnd = Math.max(measuredStart, floor.end, ...spans.map((s) => s.end))
+    const domainStart = Math.min(measuredStart, ...confirmations.map((s) => s.start))
+    const domainEnd = Math.max(measuredEnd, ...confirmations.map((s) => s.end))
+    return { ...group, floor, spans, start: measuredStart, end: measuredEnd, domainStart, domainEnd }
   })
   const domain = {
-    start: Math.min(...prepared.map((g) => g.start)),
-    end: Math.max(...prepared.map((g) => g.end)),
+    start: Math.min(...prepared.map((g) => g.domainStart)),
+    end: Math.max(...prepared.map((g) => g.domainEnd)),
   }
   const axis = axisGeometry(domain.start, domain.end, { now, pxPerMs, tickEvery, axisPad })
 
@@ -286,6 +318,7 @@ export function groupedGanttLayout(groups, { now, pxPerMs, expanded = [], tickEv
   const rowY = (index) => AXIS_H + PAD + index * (BAR_H + ROW_GAP)
 
   for (const group of prepared) {
+    const parentConfirmed = confirmedSpan(group.effort.confirmed)
     parents.push({
       group,
       x: axis.x(group.start),
@@ -300,6 +333,13 @@ export function groupedGanttLayout(groups, { now, pxPerMs, expanded = [], tickEv
       start: group.start,
       end: group.end,
       expanded: open.has(group.id),
+      confirmed: parentConfirmed
+        ? {
+            ...parentConfirmed,
+            x: axis.x(parentConfirmed.start),
+            w: Math.max((parentConfirmed.end - parentConfirmed.start) * pxPerMs, MIN_BAR_W),
+          }
+        : null,
     })
     if (!open.has(group.id) || !group.effort.issues.length) continue
 
