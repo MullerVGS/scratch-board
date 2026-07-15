@@ -17,6 +17,8 @@
  *     durações sub-hora diferentes no mesmo tamanho;
  *   - a **mesma** função, chamada com escala de **dia**, produz as posições do Gantt global —
  *     a escala é parâmetro, não um `if`;
+ *   - a barra-pai colapsada contém as filhas; expandir não move o que já estava no eixo;
+ *   - as setas de um esforço expandido são as mesmas da visão filtrada;
  *   - ciclo no `Blocked by:` não estoura.
  */
 
@@ -27,6 +29,7 @@ import { readFileSync } from 'node:fs'
 import { numberIndex } from '../public/issues.js'
 import {
   ganttLayout,
+  groupedGanttLayout,
   arrowPath,
   HOUR_W,
   DAY_W,
@@ -71,6 +74,17 @@ const issue = (number, { blockedBy = [], closed = false, status, bar = cercado }
 const layout = (issues, opts = {}) =>
   ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: HOUR_PX, floor: FLOOR, ...opts })
 const barOf = (l, number) => l.bars.find((b) => b.issue.number === number)
+
+const group = (slug, issues, floor = FLOOR) => ({
+  id: slug,
+  effort: {
+    slug,
+    issues,
+    total: issues.length,
+    closed: issues.filter((i) => i.closed).length,
+  },
+  floor,
+})
 
 describe('as bordas da barra são fatos, e apontam para o lado certo', () => {
   test('nenhuma barra começa depois de terminar', () => {
@@ -207,6 +221,116 @@ describe('a escala é parâmetro: a mesma função serve o esforço (horas) e o 
     assert.ok(dxH > 0 && dxD > 0)
     assert.ok(Math.abs(dxH / dxD - HOUR_PX / DAY_PX) < 1e-6, 'a posição escala com pxPerMs')
     assert.ok(Math.abs(barOf(emHoras, '01').w / barOf(emDias, '01').w - HOUR_PX / DAY_PX) < 1e-6, 'a largura também')
+  })
+})
+
+describe('o Gantt global agrupa esforços sem inventar outro eixo', () => {
+  const issues = () => [
+    issue('01', { closed: true, bar: measured(seg('pronto', T0 + DAY), seg('fechado', T0 + 2 * DAY)) }),
+    issue('02', { blockedBy: ['01'], bar: measured(seg('curso', T0 + 2 * DAY)) }),
+    issue('03', { closed: true, bar: measured(seg('fechado', NOW)) }),
+  ]
+
+  test('a barra-pai colapsada abrange as issues que esconde', () => {
+    const collapsed = groupedGanttLayout([group('alpha', issues())], {
+      now: NOW,
+      pxPerMs: DAY_PX,
+    })
+    const expanded = groupedGanttLayout([group('alpha', issues())], {
+      now: NOW,
+      pxPerMs: DAY_PX,
+      expanded: ['alpha'],
+    })
+    const [parent] = collapsed.parents
+    assert.equal(collapsed.bars.length, 0, 'colapsado desenha só a linha-pai')
+    for (const child of expanded.bars) {
+      assert.ok(child.x >= parent.x - 0.5, `a issue ${child.issue.number} começa dentro da pai`)
+      assert.ok(child.x + child.w <= parent.x + parent.w + 0.5, `a issue ${child.issue.number} termina dentro da pai`)
+    }
+  })
+
+  test('expandir só abre linhas: não move no tempo as barras-pai já desenhadas', () => {
+    const groups = [group('alpha', issues()), group('beta', [issue('01', { closed: true })])]
+    const collapsed = groupedGanttLayout(groups, { now: NOW, pxPerMs: DAY_PX })
+    const expanded = groupedGanttLayout(groups, { now: NOW, pxPerMs: DAY_PX, expanded: ['alpha'] })
+    for (const before of collapsed.parents) {
+      const after = expanded.parents.find((p) => p.group.id === before.group.id)
+      assert.equal(after.x, before.x, `${before.group.id} conserva o instante inicial`)
+      assert.equal(after.w, before.w, `${before.group.id} conserva a duração`)
+    }
+  })
+
+  test('as setas das issues expandidas são as mesmas do layout filtrado', () => {
+    const children = issues()
+    const filtered = ganttLayout(children, numberIndex(children), {
+      now: NOW,
+      pxPerMs: DAY_PX,
+      floor: FLOOR,
+    })
+    const global = groupedGanttLayout([group('alpha', children)], {
+      now: NOW,
+      pxPerMs: DAY_PX,
+      expanded: ['alpha'],
+    })
+    assert.equal(global.arrows.length, filtered.arrows.length)
+    for (let i = 0; i < filtered.arrows.length; i++) {
+      assert.equal(global.arrows[i].from.number, filtered.arrows[i].from.number)
+      assert.equal(global.arrows[i].to.number, filtered.arrows[i].to.number)
+      assert.equal(global.arrows[i].x1, filtered.arrows[i].x1)
+      assert.equal(global.arrows[i].x2, filtered.arrows[i].x2)
+    }
+  })
+})
+
+describe('o futuro do eixo: `axisPad` abre espaço à direita do "agora"', () => {
+  test('o eixo se estica para o futuro, mas as barras e o cerco param no tempo real', () => {
+    // Esforço vivo: uma issue aberta corre até "hoje" (NOW). O `axisPad` de 6h põe eixo além dela.
+    const floor = { start: T0, end: NOW }
+    const issues = [issue('01', { bar: measured(seg('curso', NOW - 2 * HOUR)) })]
+    const semPad = ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: HOUR_PX, floor, tickEvery: HOUR })
+    const comPad = ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: HOUR_PX, floor, tickEvery: HOUR, axisPad: 6 * HOUR })
+    assert.ok(Math.abs(comPad.width - semPad.width - 6 * HOUR_W) < 0.5, 'o eixo cresceu as 6h de futuro pedidas')
+    assert.equal(comPad.todayX, semPad.todayX, 'o "hoje" fica onde estava — o futuro é à direita dele')
+    assert.equal(barOf(comPad, '01').w, barOf(semPad, '01').w, 'a barra aberta não invade o futuro; ela para em "hoje"')
+    assert.equal(comPad.cerco.w, semPad.cerco.w, 'o cerco também não se estica')
+    assert.ok(comPad.ticks.at(-1).at > semPad.ticks.at(-1).at, 'há tiques de hora no futuro, rotulados')
+  })
+
+  test('num esforço encerrado no passado, o futuro NÃO se estica — não há "hoje" para centralizar', () => {
+    // Todas fechadas, cerco terminando antes de NOW: "hoje" está fora do desenho.
+    const floor = { start: T0, end: T0 + 6 * HOUR }
+    const issues = [issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 5 * HOUR)) })]
+    const l = ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: HOUR_PX, floor, tickEvery: HOUR, axisPad: 6 * HOUR })
+    assert.equal(l.todayX, null, 'um desenho todo no passado não tem "hoje"')
+    assert.ok(l.ticks.at(-1).at <= T0 + 6 * HOUR, 'sem futuro esticado: o eixo para no fim do esforço')
+  })
+})
+
+describe('o eixo preenchido: `tickEvery` põe um tique por unidade', () => {
+  test('com `tickEvery: HORA`, todo horário aparece — um tique por hora, sem pular', () => {
+    // Cerco de 6 horas: o eixo tem que trazer as 7 fronteiras (00h..06h), não de 2 em 2.
+    const floor = { start: T0, end: T0 + 6 * HOUR }
+    const issues = [issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 5 * HOUR)) })]
+    const l = ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: HOUR_PX, floor, tickEvery: HOUR })
+    assert.equal(l.step, HOUR, 'o passo é a hora que se pediu, não o automático')
+    assert.equal(l.ticks.length, 7, 'as 7 fronteiras de hora do vão de 6h estão todas lá')
+    for (let i = 1; i < l.ticks.length; i++) {
+      assert.ok(Math.abs(l.ticks[i].x - l.ticks[i - 1].x - HOUR_W) < 0.5, 'os tiques distam uma hora um do outro')
+    }
+  })
+
+  test('a rede: um vão de semanas em escala de hora não gera milhares de tiques — o passo volta a crescer', () => {
+    const floor = { start: T0, end: T0 + 30 * DAY }
+    const issues = [issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 20 * DAY)) })]
+    const l = ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: HOUR_PX, floor, tickEvery: HOUR })
+    assert.ok(l.step > HOUR, 'passar da rede devolve o passo automático, maior que a hora')
+    assert.ok(l.ticks.length <= 40, `${l.ticks.length} tiques ainda se leem — a rede segurou o preenchimento`)
+  })
+
+  test('sem `tickEvery`, o passo é o automático — é assim que o global mede em dias', () => {
+    const issues = [issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 3 * DAY)) })]
+    const l = ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: DAY_PX, floor: FLOOR })
+    assert.ok(l.step >= DAY, 'sem preencher, o passo cresce sozinho para os dias não se atropelarem')
   })
 })
 

@@ -1,39 +1,30 @@
 /**
- * O desenho do Gantt: **HTML posicionado para rótulos e barras, SVG só para as setas** — a
- * mesma divisão do grafo, pelas mesmas razões (foco por teclado, clique que abre a gaveta,
- * texto que não precisa ser reimplementado em SVG).
- *
- * A geometria não é decidida aqui — ela vem inteira do `gantt-layout.js`, que é puro e testado.
- * O que é daqui: o "hoje" e a escala (o relógio e o zoom são de quem desenha), a subdivisão das
- * barras sólidas por coluna, a hachura das cercadas, os tooltips e o clique.
- *
- * **Sólido é fato, hachurado é cerco.** A barra medida (o servidor viu transicionar) sai sólida
- * e subdividida pelas colunas; a nunca observada sai hachurada sobre o intervalo do esforço —
- * "aconteceu em algum momento aqui dentro", nunca uma data inventada.
+ * O desenho único da linha do tempo. Com um grupo expandido, é o Gantt filtrado de um esforço;
+ * com a frota inteira, são esforços-pai colapsáveis e suas issues logo abaixo. HTML posiciona
+ * rótulos/barras; SVG desenha somente as setas compartilhadas com o grafo.
  */
 import { el, esc, svg, pressable } from './dom.js'
-import { cleanTitle, numberIndex } from './issues.js'
-import { ganttLayout, arrowPath, HOUR_W, BAR_H, LABEL_W } from './gantt-layout.js'
+import { cleanTitle } from './issues.js'
+import { groupedGanttLayout, arrowPath, HOUR_W, DAY_W, BAR_H, LABEL_W } from './gantt-layout.js'
 import { edgeDefs, edgeEl } from './edges.js'
 import { openIssue } from './drawer.js'
+import { boardOf } from './state.js'
+import { view, crumbs, tally } from './shell.js'
+import { fleetSwitch } from './overview.js'
 
 const HOUR = 3600e3
 const DAY = 864e5
+const HOUR_PX = HOUR_W / HOUR
+const DAY_PX = DAY_W / DAY
 
-/** O Gantt do esforço mede em **horas**: um esforço dura dias, mas suas issues duram minutos. */
-const PX_PER_MS = HOUR_W / HOUR
-
-/** `2026-07-10` → ms na meia-noite UTC; somar um dia fecha o cerco de um esforço arquivado. */
-const dayMs = (day) => Date.parse(day)
-
-const iso = (ms) => new Date(ms).toISOString()
+/** Horário de Brasília (UTC−3): o dado é absoluto; o fuso só existe no rótulo. */
+const BR = -3 * HOUR
+const iso = (ms) => new Date(ms + BR).toISOString()
 const ddmm = (ms) => `${iso(ms).slice(8, 10)}/${iso(ms).slice(5, 7)}`
 const hh = (ms) => `${iso(ms).slice(11, 13)}h`
+const dayMs = (day) => Date.parse(`${day}T00:00:00-03:00`)
+const tickLabel = (at, step) => (step >= DAY || (at + BR) % DAY === 0 ? ddmm(at) : hh(at))
 
-/** O rótulo de um tique: data na virada do dia, hora no meio dela. */
-const tickLabel = (at, step) => (step >= DAY || at % DAY === 0 ? ddmm(at) : hh(at))
-
-/** Uma duração humana, do minuto ao dia — é o que a barra responde no hover. */
 function humanDur(ms) {
   const min = Math.round(ms / 60e3)
   if (min < 60) return `${min}min`
@@ -43,64 +34,94 @@ function humanDur(ms) {
   return h % 24 ? `${d}d ${h % 24}h` : `${d}d`
 }
 
-/**
- * O que a barra responde ao hover. A sólida diz o intervalo ao minuto e a duração; a hachurada
- * admite que o início e o fim são um cerco (`~`), não um fato — é a barra dizendo o que sabe.
- */
 function barTitle(bar) {
   const { issue } = bar
   const dur = humanDur(bar.end - bar.start)
   if (bar.kind === 'hatched') {
     return `~ ${ddmm(bar.start)} → ${bar.open ? 'hoje' : ddmm(bar.end)} · nunca observado · ${issue.status}`
   }
-  const fim = bar.open ? 'hoje' : `${ddmm(bar.end)} ${hh(bar.end)}`
-  return `${ddmm(bar.start)} ${hh(bar.start)} → ${fim} · ${dur} · ${issue.status}`
+  const end = bar.open ? 'hoje' : `${ddmm(bar.end)} ${hh(bar.end)}`
+  return `${ddmm(bar.start)} ${hh(bar.start)} → ${end} · ${dur} · ${issue.status}`
 }
 
-export function renderGantt(effort, archived) {
+const parentTitle = ({ group, start, end }) => {
+  const { effort } = group
+  const endLabel = effort.ended ? ddmm(dayMs(effort.ended)) : 'hoje'
+  return `${effort.slug} · ${effort.closed} de ${effort.total} · ${ddmm(start)} → ${endLabel} · ${humanDur(end - start)}`
+}
+
+const entryId = (effort, archived) => `${archived ? 'archive/' : ''}${effort.slug}`
+
+function entry(effort, archived, now) {
+  return {
+    id: entryId(effort, archived),
+    effort,
+    archived,
+    floor: {
+      start: effort.created ? dayMs(effort.created) : now,
+      end: effort.ended ? dayMs(effort.ended) + DAY : now,
+    },
+  }
+}
+
+/** Desenha os dois escopos sem bifurcar a tela: só mudam grupos, escala e estado expandido. */
+function renderTimeline(groups, { pxPerMs, tickEvery, expanded, onToggle, centerToday = false }) {
   const wrap = el('<div class="gantt"></div>')
-  if (!effort.issues.length) {
-    wrap.append(el('<p class="empty">Esforço sem issues — não há linha do tempo a desenhar.</p>'))
+  if (!groups.length) {
+    wrap.append(el('<p class="empty">Nenhum esforço — não há linha do tempo a desenhar.</p>'))
     return wrap
   }
 
-  const byNumber = numberIndex(effort.issues)
-  // O relógio e o cerco são de quem desenha. O `created`/`ended` do esforço vêm do disco (dia
-  // UTC); o `ended` ausente quer dizer "ainda vivo", e o cerco estica até "hoje". O servidor
-  // não manda "hoje" — hoje envelhece, e payload que envelhece sozinho é o polling ressuscitado.
   const now = Date.now()
-  const floor = {
-    start: effort.created ? dayMs(effort.created) : now,
-    end: effort.ended ? dayMs(effort.ended) + DAY : now,
-  }
-  const { bars, arrows, ticks, step, todayX, cerco, width, height } = ganttLayout(effort.issues, byNumber, {
+  const unit = tickEvery ?? DAY
+  const axisPad = centerToday ? Math.ceil(window.innerWidth / 2 / pxPerMs / unit) * unit : 0
+  const { parents, bars, arrows, ticks, step, todayX, width, height } = groupedGanttLayout(groups, {
     now,
-    pxPerMs: PX_PER_MS,
-    floor,
+    pxPerMs,
+    expanded,
+    tickEvery,
+    axisPad,
   })
-
   const canvas = el(`<div class="gantt-canvas" style="width:${width}px; height:${height}px"></div>`)
 
-  // O cerco do esforço: uma faixa tênue por trás de tudo, do `created` ao `ended`/hoje. É a
-  // barra-pai de disco — o intervalo em que as hachuradas se inscrevem.
-  if (cerco.w > 0) {
-    canvas.append(el(`<div class="gcerco" style="left:${cerco.x}px; width:${cerco.w}px; top:0; height:${height}px"></div>`))
-  }
-
-  for (const t of ticks) {
-    if (t.x === todayX) continue // a linha de "hoje" já marca este ponto; dois rótulos se atropelam
+  for (const tick of ticks) {
+    if (tick.x === todayX) continue
     canvas.append(
-      el(`<div class="gtick" style="left:${t.x}px; height:${height}px"><span>${esc(tickLabel(t.at, step))}</span></div>`),
+      el(`<div class="gtick" style="left:${tick.x}px; height:${height}px"><span>${esc(tickLabel(tick.at, step))}</span></div>`),
     )
   }
   if (todayX !== null) {
     canvas.append(el(`<div class="gtick is-today" style="left:${todayX}px; height:${height}px"><span>hoje</span></div>`))
   }
 
-  for (const bar of bars) {
-    const { issue } = bar
+  for (const parent of parents) {
+    const { group } = parent
+    const { effort } = group
+    const interactive = Boolean(onToggle)
+    const toggleClass = interactive ? 'is-toggle' : ''
+    const toggleAttrs = interactive ? 'tabindex="0" role="button"' : ''
+    const glyph = interactive ? (parent.expanded ? '▾' : '▸') : '·'
     const label = el(`
-      <div class="glabel ${issue.closed ? 'is-closed' : ''}" style="top:${bar.y}px; width:${LABEL_W}px; height:${BAR_H}px"
+      <div class="glabel is-parent ${toggleClass}" style="top:${parent.y}px; width:${LABEL_W}px; height:${BAR_H}px"
+           ${toggleAttrs}>
+        <b>${glyph}</b><span>${esc(effort.slug)}</span><em>${effort.closed} de ${effort.total}</em>
+      </div>
+    `)
+    const rect = el(`
+      <div class="gbar is-parent ${toggleClass}" style="left:${parent.x}px; top:${parent.y}px; width:${parent.w}px; height:${BAR_H}px"
+           title="${esc(parentTitle(parent))}"></div>
+    `)
+    if (interactive) {
+      pressable(label, () => onToggle(group.id))
+      pressable(rect, () => onToggle(group.id))
+    }
+    canvas.append(label, rect)
+  }
+
+  for (const bar of bars) {
+    const { issue, group } = bar
+    const label = el(`
+      <div class="glabel is-child ${issue.closed ? 'is-closed' : ''}" style="top:${bar.y}px; width:${LABEL_W}px; height:${BAR_H}px"
            tabindex="0" role="button">
         <b>${esc(issue.number)}</b><span>${esc(cleanTitle(issue))}</span>
       </div>
@@ -110,31 +131,84 @@ export function renderGantt(effort, archived) {
            style="left:${bar.x}px; top:${bar.y}px; width:${bar.w}px; height:${BAR_H}px"
            title="${esc(barTitle(bar))}"></div>
     `)
-    // As faixas por coluna dentro da barra sólida — o "tempo em coluna". Posicionadas relativas
-    // à barra (a barra é o contêiner), então o `border-radius` dela as recorta nas pontas.
-    for (const s of bar.segments) {
-      if (s.w <= 0) continue
-      rect.append(el(`<div class="gseg is-${esc(s.column)}" style="left:${s.x - bar.x}px; width:${s.w}px"></div>`))
+    for (const segment of bar.segments) {
+      if (segment.w <= 0) continue
+      rect.append(el(`<div class="gseg is-${esc(segment.column)}" style="left:${segment.x - bar.x}px; width:${segment.w}px"></div>`))
     }
-    pressable(label, () => openIssue(issue, effort, archived))
-    pressable(rect, () => openIssue(issue, effort, archived))
+    pressable(label, () => openIssue(issue, group.effort, group.archived))
+    pressable(rect, () => openIssue(issue, group.effort, group.archived))
     canvas.append(label, rect)
   }
 
-  // As setas do `Blocked by:` — a maquinaria compartilhada com o grafo (`edges.js`).
   const edges = svg('svg', { class: 'gantt-edges', width, height })
   edges.append(edgeDefs('gantt'))
-  for (const a of arrows) edges.append(edgeEl('gantt', { ...a, d: arrowPath(a) }))
+  for (const arrow of arrows) edges.append(edgeEl('gantt', { ...arrow, d: arrowPath(arrow) }))
   canvas.append(edges)
   wrap.append(canvas)
 
-  // A hachura é o desenho da incerteza: o board nunca observou aquele ticket transicionar, e o
-  // disco só garante que ele viveu dentro do esforço. A nota explica o traço para o desenho
-  // honesto não parecer um bug.
-  if (bars.some((b) => b.kind === 'hatched')) {
+  if (centerToday && todayX !== null) {
+    requestAnimationFrame(() => {
+      wrap.scrollLeft = todayX - wrap.clientWidth / 2
+    })
+  }
+  if (bars.some((bar) => bar.kind === 'hatched')) {
     wrap.append(
-      el('<p class="viewnote">Barra hachurada = o servidor nunca viu este ticket transicionar; o disco só garante que ele viveu dentro do esforço. Cada transição observada a solidifica.</p>'),
+      el('<p class="viewnote">Barra hachurada = o servidor nunca viu este ticket transicionar; o disco só garante que ele viveu dentro do esforço.</p>'),
     )
   }
   return wrap
+}
+
+/** A terceira aba do esforço usa a mesma timeline, com um grupo que nasce expandido. */
+export function renderGantt(effort, archived) {
+  const now = Date.now()
+  const group = entry(effort, archived, now)
+  return renderTimeline([group], {
+    pxPerMs: HOUR_PX,
+    tickEvery: HOUR,
+    expanded: [group.id],
+    centerToday: true,
+  })
+}
+
+/** A rota global: frota colapsada por padrão; cada expansão é um segmento colável do hash. */
+export function renderGlobalGantt(ns, expandedIds = []) {
+  const board = boardOf(ns)
+  if (board.error) {
+    crumbs.replaceChildren()
+    view.replaceChildren(
+      fleetSwitch(ns, 'gantt'),
+      el(`<p class="empty bad"><strong>Falha ao ler <code>${esc(board.ref)}</code>.</strong> ${esc(board.error)}</p>`),
+    )
+    tally.textContent = 'origem ilegível'
+    return
+  }
+  const now = Date.now()
+  const groups = [
+    ...board.efforts.map((effort) => entry(effort, false, now)),
+    ...board.archived.map((effort) => entry(effort, true, now)),
+  ]
+  const known = new Set(groups.map((group) => group.id))
+  const expanded = new Set(expandedIds.filter((id) => known.has(id)))
+
+  crumbs.replaceChildren()
+  const toggle = (id) => {
+    if (expanded.has(id)) expanded.delete(id)
+    else expanded.add(id)
+    const ordered = groups.map((group) => group.id).filter((groupId) => expanded.has(groupId))
+    location.hash = `#/${ns}/-/gantt${ordered.length ? `/${ordered.map(encodeURIComponent).join('/')}` : ''}`
+  }
+
+  view.replaceChildren(
+    fleetSwitch(ns, 'gantt'),
+    renderTimeline(groups, {
+      pxPerMs: DAY_PX,
+      tickEvery: DAY,
+      expanded,
+      onToggle: toggle,
+    }),
+  )
+  const total = groups.reduce((sum, group) => sum + group.effort.total, 0)
+  const closed = groups.reduce((sum, group) => sum + group.effort.closed, 0)
+  tally.textContent = `${groups.length} esforços · ${closed}/${total} issues fechadas`
 }

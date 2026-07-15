@@ -11,6 +11,17 @@ import { el, esc, copyBtn } from './dom.js'
 import { boardOf } from './state.js'
 import { view, crumbs, tally } from './shell.js'
 
+/** O alternador da visão geral: o modo também é navegação e, portanto, mora no hash. */
+export function fleetSwitch(ns, on) {
+  const node = el('<div class="viewswitch" role="tablist"></div>')
+  for (const [name, hash] of [['esforços', `#/${ns}`], ['gantt', `#/${ns}/-/gantt`]]) {
+    const button = el(`<button role="tab" class="${on === name ? 'on' : ''}" aria-selected="${on === name}">${name}</button>`)
+    button.onclick = () => (location.hash = hash)
+    node.append(button)
+  }
+  return node
+}
+
 // ---------- chips de status ----------
 
 /** Ordem de leitura: o que trava primeiro, o que já fechou por último. */
@@ -143,11 +154,14 @@ export function renderOverview(ns) {
   // a página vazia antes de pintar a página nova, e é isso que se vê como piscada. A
   // árvore nova é montada de lado e trocada de uma vez: uma pintura só.
   if (!sections.length) {
-    view.replaceChildren(el(`<p class="empty">Nenhum esforço em <code>${esc(board.ref)}</code></p>`))
+    view.replaceChildren(
+      fleetSwitch(ns, 'esforços'),
+      el(`<p class="empty">Nenhum esforço em <code>${esc(board.ref)}</code></p>`),
+    )
     tally.textContent = `0 esforços`
     return
   }
-  view.replaceChildren(...sections)
+  view.replaceChildren(fleetSwitch(ns, 'esforços'), ...sections)
 
   const openIssues = board.efforts.reduce((n, e) => n + (e.total - e.closed), 0)
   tally.textContent = `${board.efforts.length} esforços · ${openIssues} issues abertas · ${board.archived.length} arquivados`

@@ -1,9 +1,10 @@
 /**
  * O roteador: o hash decide a tela — e a **origem** é a primeira coisa que ele diz.
  *
- * `#/<ns>` é a visão geral daquela origem, `#/<ns>/<slug>` o kanban de um esforço,
- * `#/<ns>/<slug>/grafo` o grafo e `#/<ns>/<slug>/gantt` o Gantt, com `archive/` na frente
- * quando o esforço já foi encerrado. `#/pads` são os scratchpads, e eles ficam **fora**
+ * `#/<ns>` é a visão geral daquela origem, `#/<ns>/-/gantt[/<expandidos>...]` o Gantt global,
+ * `#/<ns>/<slug>` o kanban de um esforço, `#/<ns>/<slug>/grafo` o grafo e
+ * `#/<ns>/<slug>/gantt` o Gantt filtrado, com `archive/` na frente quando o esforço já foi
+ * encerrado. `#/pads` são os scratchpads, e eles ficam **fora**
  * das origens: são rascunho global de sessão, não tracker de repositório nenhum.
  *
  * **Toda rota é qualificada, e não há rota legada sem origem.** Um `#/x` em que `x` não é
@@ -18,6 +19,7 @@ import { state } from './state.js'
 import { view, crumbs, tally, bindConnection, renderTabs } from './shell.js'
 import { renderOverview } from './overview.js'
 import { renderEffort } from './effort.js'
+import { renderGlobalGantt } from './gantt.js'
 import { renderPads } from './pads.js'
 
 const parts = () => location.hash.replace(/^#\/?/, '').split('/').filter(Boolean)
@@ -65,6 +67,19 @@ export function route() {
   let rest = seg.slice(1)
   const archived = rest[0] === 'archive'
   if (archived) rest = rest.slice(1)
+
+  // A frota inteira. Os segmentos seguintes são as identidades dos esforços expandidos;
+  // ficam no hash para a mesma abertura continuar colável.
+  if (!archived && rest[0] === '-' && rest[1] === 'gantt') {
+    const expanded = rest.slice(2).map((id) => {
+      try {
+        return decodeURIComponent(id)
+      } catch {
+        return id
+      }
+    })
+    return renderGlobalGantt(ns, expanded)
+  }
 
   const slug = rest[0]
   if (!slug) return renderOverview(ns)

@@ -15,16 +15,19 @@
  * separação não é cosmética — é o que torna os invariantes testáveis sem um navegador
  * (`test/gantt-layout.test.js`), e o precedente do grafo já pagou essa aposta.
  *
- * **A escala entra por parâmetro** (`pxPerMs`), não como um `if`. O Gantt do esforço mede em
- * **horas** (`HOUR_W`) porque suas issues duram horas ou minutos; o Gantt global (ticket 05)
- * mede em **dias** (`DAY_W`) porque a frota se mede em meses — a mesma função, escalas
- * diferentes. Um `if` no meio do layout seria o desenho errado.
+ * **A escala entra por parâmetro** (`pxPerMs`), não como um `if`, e é **fixa** — nenhuma das rotas
+ * encolhe para caber: um esforço longo **rola** na horizontal, como o Gantt de dias. O Gantt do
+ * esforço mede em **horas** (`HOUR_W`, largo o bastante para rotular **cada** hora); o global
+ * (ticket 05) mede em **dias** (`DAY_W`), porque a frota se mede em meses. Quando se quer o eixo
+ * **preenchido** — todo horário rotulado —, o intervalo dos tiques entra por `tickEvery`; senão o
+ * passo cresce sozinho (`tickStep`) para os tiques não se atropelarem.
  *
- * **O "hoje" também entra por parâmetro.** Um relógio aqui dentro faria o desenho depender de
- * quando ele rodou, e os testes virariam loteria de meia-noite. Quem sabe que horas são é quem
- * desenha — a mesma doutrina do `now` do `staleLabel()`.
+ * **O "hoje" também entra por parâmetro**, e o **fuso não entra aqui**: as posições são absolutas
+ * (ms), e quem rotula em Brasília é o desenho (`gantt.js`). Um relógio ou um fuso aqui dentro faria
+ * o desenho depender de quando/onde rodou, e os testes virariam loteria de meia-noite. Quem sabe
+ * que horas são — e em que fuso — é quem desenha, a mesma doutrina do `now` do `staleLabel()`.
  */
-import { depsOf } from './issues.js'
+import { depsOf, numberIndex } from './issues.js'
 
 export const LABEL_W = 280
 export const BAR_H = 30
@@ -32,8 +35,13 @@ export const ROW_GAP = 10
 export const PAD = 18
 export const AXIS_H = 26
 
-/** Pixels por **hora** (Gantt do esforço) e por **dia** (Gantt global). A escala, materializada. */
-export const HOUR_W = 80
+/**
+ * A escala **fixa** de cada rota, e as duas são diferentes de propósito. `HOUR_W` é px por **hora**
+ * (Gantt do esforço), larga o bastante para caber o rótulo de **cada hora** no eixo; `DAY_W` é px
+ * por **dia** (Gantt global). Nenhuma das duas encolhe para caber: um esforço longo **rola** na
+ * horizontal — a rolagem é a leitura, como no Gantt de dias. Mais denso é mexer só neste número.
+ */
+export const HOUR_W = 44
 export const DAY_W = 40
 
 /**
@@ -113,7 +121,46 @@ const MAX_TICKS = 24
 const tickStep = (pxPerMs, span) =>
   STEPS.find((s) => s * pxPerMs >= MIN_TICK_PX && span / s <= MAX_TICKS) ?? STEPS[STEPS.length - 1]
 
-export function ganttLayout(issues, byNumber, { now, pxPerMs, floor }) {
+/**
+ * `tickEvery` (opcional): quando quem desenha quer **toda unidade preenchida** — cada hora rotulada,
+ * como o Gantt de dias rotula cada dia —, ele passa o intervalo (uma hora) e o eixo o usa cru, sem
+ * o `tickStep` engolir tiques para não afogar. O teto `MAX_FILL_TICKS` é só a rede: um esforço de
+ * semanas em escala de hora geraria milhares de divs, e aí o passo automático volta a valer.
+ */
+const MAX_FILL_TICKS = 600
+const axisStep = (pxPerMs, span, tickEvery) =>
+  tickEvery && span / tickEvery <= MAX_FILL_TICKS ? tickEvery : tickStep(pxPerMs, span)
+
+/** A geometria compartilhada do eixo. O domínio é absoluto; escala e preenchimento são parâmetros. */
+function axisGeometry(minTime, maxTime, { now, pxPerMs, tickEvery, axisPad = 0 }) {
+  const x = (t) => LABEL_W + PAD + (t - minTime) * pxPerMs
+  const live = now >= minTime && now <= maxTime
+  const axisEnd = maxTime + (live ? axisPad : 0)
+  const step = axisStep(pxPerMs, axisEnd - minTime, tickEvery)
+  const ticks = []
+  for (let t = Math.ceil(minTime / step) * step; t <= axisEnd; t += step) ticks.push({ at: t, x: x(t) })
+  return {
+    x,
+    ticks,
+    step,
+    todayX: live ? x(now) : null,
+    width: x(axisEnd) + PAD,
+  }
+}
+
+/**
+ * `tickEvery` (opcional): o intervalo em que o eixo é **preenchido** — uma hora, no Gantt do
+ * esforço, para todo horário aparecer rotulado. Ausente (Gantt global), o passo é automático
+ * (`tickStep`), que cresce para os dias não se atropelarem. A escala em si (`pxPerMs`) é **fixa** e
+ * não cabe para caber: um esforço longo rola na horizontal, como o Gantt de dias.
+ *
+ * `axisPad` (opcional, ms): quanto **futuro** o eixo mostra além do fim do conteúdo. Ele estica só o
+ * **eixo** — os tiques e a largura —, nunca as barras nem o cerco (que param no seu tempo real): é o
+ * espaço à direita do "agora" que deixa a linha de "hoje" ser rolada até o **centro** da tela em vez
+ * de morrer na borda. Só entra quando "hoje" está no desenho (esforço vivo); num esforço encerrado
+ * no passado, esticar o futuro seria eixo vazio apontando para um dia em que nada aconteceu.
+ */
+export function ganttLayout(issues, byNumber, { now, pxPerMs, floor, tickEvery, axisPad = 0, domain }) {
   const cercoStart = floor?.start ?? now
   const cercoEnd = floor?.end ?? now
 
@@ -133,9 +180,12 @@ export function ganttLayout(issues, byNumber, { now, pxPerMs, floor }) {
   const spans = new Map(issues.map((i) => [i, spanOf(i, { start: cercoStart, end: cercoEnd }, now)]))
   const rows = [...issues].sort(byResolution(spans))
 
-  const minTime = Math.min(cercoStart, ...[...spans.values()].map((s) => s.start))
-  const maxTime = Math.max(cercoEnd, ...[...spans.values()].map((s) => s.end))
-  const x = (t) => LABEL_W + PAD + (t - minTime) * pxPerMs
+  // `domain` alinha vários esforços no mesmo eixo sem mudar a geometria interna de nenhum deles.
+  // É a costura do Gantt global: cada grupo conserva seu próprio cerco, mas todos compartilham X.
+  const minTime = Math.min(domain?.start ?? Infinity, cercoStart, ...[...spans.values()].map((s) => s.start))
+  const maxTime = Math.max(domain?.end ?? -Infinity, cercoEnd, ...[...spans.values()].map((s) => s.end))
+  const axis = axisGeometry(minTime, maxTime, { now, pxPerMs, tickEvery, axisPad })
+  const { x } = axis
 
   const bars = rows.map((issue, ri) => {
     const s = spans.get(issue)
@@ -181,25 +231,101 @@ export function ganttLayout(issues, byNumber, { now, pxPerMs, floor }) {
     }
   }
 
-  // O eixo, do domínio inteiro, alinhado às fronteiras redondas de hora/dia (UTC, como o resto
-  // do projeto). O passo cresce com o vão para os tiques não se atropelarem.
-  const step = tickStep(pxPerMs, maxTime - minTime)
-  const ticks = []
-  for (let t = Math.ceil(minTime / step) * step; t <= maxTime; t += step) ticks.push({ at: t, x: x(t) })
-
   return {
     bars,
     arrows,
-    ticks,
-    step,
+    ticks: axis.ticks,
+    step: axis.step,
     // O intervalo do esforço, o **cerco**: onde vivem as barras hachuradas e a barra-pai do
     // Gantt global. Largura nunca negativa — o disco contraditório se recolhe, não inverte.
     cerco: { x: x(cercoStart), w: Math.max(0, cercoEnd - cercoStart) * pxPerMs, start: cercoStart, end: cercoEnd },
     // A linha de "hoje" só quando hoje cabe no desenho. Num esforço encerrado no passado,
     // marcá-lo seria esticar o eixo para apontar um dia em que nada daqui aconteceu.
-    todayX: now >= minTime && now <= maxTime ? x(now) : null,
-    width: x(maxTime) + PAD,
+    todayX: axis.todayX,
+    width: axis.width,
     height: AXIS_H + PAD * 2 + rows.length * (BAR_H + ROW_GAP) - ROW_GAP,
+  }
+}
+
+/**
+ * A frota como grupos: uma barra-pai por esforço e, quando expandido, as issues logo abaixo.
+ * Cada grupo continua usando `ganttLayout()`; esta função só lhes dá um domínio X comum e empilha
+ * as linhas. Assim, expandir altera Y (abre espaço para as filhas), mas nunca move no tempo uma
+ * barra que já existia.
+ *
+ * Entrada: `{ id, effort, floor }`, onde `floor` é o cerco daquele esforço em ms. `id` é a
+ * identidade que vive no hash (inclui `archive/` quando necessário).
+ */
+export function groupedGanttLayout(groups, { now, pxPerMs, expanded = [], tickEvery, axisPad = 0 }) {
+  if (!groups.length) {
+    return {
+      parents: [], bars: [], arrows: [], ticks: [], todayX: null,
+      step: STEPS[0], width: LABEL_W + PAD * 2, height: AXIS_H + PAD * 2,
+    }
+  }
+
+  const open = expanded instanceof Set ? expanded : new Set(expanded)
+  const prepared = groups.map((group) => {
+    const floor = group.floor ?? { start: now, end: now }
+    const spans = group.effort.issues.map((issue) => spanOf(issue, floor, now))
+    // A pai é o resumo do grupo: deve conter toda filha, inclusive diante de dado contraditório.
+    const start = Math.min(floor.start, ...spans.map((s) => s.start))
+    const end = Math.max(start, floor.end, ...spans.map((s) => s.end))
+    return { ...group, floor, spans, start, end }
+  })
+  const domain = {
+    start: Math.min(...prepared.map((g) => g.start)),
+    end: Math.max(...prepared.map((g) => g.end)),
+  }
+  const axis = axisGeometry(domain.start, domain.end, { now, pxPerMs, tickEvery, axisPad })
+
+  const parents = []
+  const bars = []
+  const arrows = []
+  let row = 0
+  const rowY = (index) => AXIS_H + PAD + index * (BAR_H + ROW_GAP)
+
+  for (const group of prepared) {
+    parents.push({
+      group,
+      x: axis.x(group.start),
+      y: rowY(row++),
+      // O piso visual de uma filha de duração zero também cabe: conter é verdade em pixels,
+      // não só nos instantes crus.
+      w: Math.max(
+        (group.end - group.start) * pxPerMs,
+        MIN_BAR_W,
+        ...group.spans.map((span) => (span.start - group.start) * pxPerMs + Math.max((span.end - span.start) * pxPerMs, MIN_BAR_W)),
+      ),
+      start: group.start,
+      end: group.end,
+      expanded: open.has(group.id),
+    })
+    if (!open.has(group.id) || !group.effort.issues.length) continue
+
+    const child = ganttLayout(group.effort.issues, numberIndex(group.effort.issues), {
+      now,
+      pxPerMs,
+      floor: group.floor,
+      domain,
+    })
+    const offsetY = rowY(row) - (AXIS_H + PAD)
+    for (const bar of child.bars) bars.push({ ...bar, group, y: bar.y + offsetY })
+    for (const arrow of child.arrows) {
+      arrows.push({ ...arrow, group, y1: arrow.y1 + offsetY, y2: arrow.y2 + offsetY })
+    }
+    row += child.bars.length
+  }
+
+  return {
+    parents,
+    bars,
+    arrows,
+    ticks: axis.ticks,
+    step: axis.step,
+    todayX: axis.todayX,
+    width: axis.width,
+    height: AXIS_H + PAD * 2 + row * (BAR_H + ROW_GAP) - ROW_GAP,
   }
 }
 

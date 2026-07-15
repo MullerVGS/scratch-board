@@ -13,16 +13,6 @@
   position: relative;
 }
 
-/* O cerco do esforço: a faixa tênue do `created` ao `ended`/hoje, por trás de tudo. É a
-   barra-pai de disco — o intervalo em que as hachuradas se inscrevem. */
-.gcerco {
-  position: absolute;
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-  border-left: 1px solid var(--line-soft);
-  border-right: 1px solid var(--line-soft);
-  pointer-events: none;
-}
-
 /* ---------- o eixo de datas ---------- */
 
 .gtick {
@@ -89,6 +79,34 @@
   color: var(--muted);
 }
 
+/* A linha-pai resume o esforço. O recuo separa as issues sem abrir uma segunda árvore visual. */
+.glabel.is-parent {
+  gap: 7px;
+  font-weight: 650;
+}
+
+.glabel.is-parent b {
+  width: 12px;
+  color: var(--accent);
+}
+
+.glabel.is-parent em {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.glabel.is-parent:not(.is-toggle) {
+  cursor: default;
+}
+
+.glabel.is-child {
+  padding-left: 20px;
+}
+
 /* ---------- as barras ---------- */
 
 .gbar {
@@ -104,6 +122,17 @@
 .gbar:hover {
   border-color: var(--accent);
   z-index: 2;
+}
+
+/* A barra-pai é o intervalo agregado do esforço; as filhas preservam sólido/hachurado. */
+.gbar.is-parent {
+  background: color-mix(in srgb, var(--accent) 28%, var(--panel-2));
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  cursor: default;
+}
+
+.gbar.is-parent.is-toggle {
+  cursor: pointer;
 }
 
 .gbar.is-blocked {
