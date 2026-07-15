@@ -60,7 +60,12 @@ async function walk(dir, out = []) {
  * arquivo que ela tem. Nada aqui é compartilhado com outra origem, e é o que garante que
  * uma escrita no `vend-server` não suprima — nem acorde — o board do `projetos`.
  */
-export function createCache(ns) {
+export function createCache(ns, history) {
+  // O `history` é o catálogo (um só, do servidor), repassado ao `buildBoard()` para ele
+  // destilar a barra do Gantt de cada issue. É leitura pura daqui: o cache não o alimenta —
+  // quem observa e escreve é o `sync()`, depois que o board é lido. `undefined` degrada para
+  // barras hachuradas, sem quebrar nada.
+
   // O hash do último board que **saiu daqui**. É contra ele que toda leitura nova se
   // compara — e é a razão de a varredura de segurança (90s) custar quase nada: ela
   // reconstrói, não reconhece nada de novo, e cala a boca.
@@ -97,7 +102,7 @@ export function createCache(ns) {
   async function refresh() {
     let board
     try {
-      board = await buildBoard(ns)
+      board = await buildBoard(ns, history)
     } catch (err) {
       board = errorBoard(ns, err.message)
     }

@@ -169,11 +169,40 @@ async function readStamped(path) {
  */
 const dayOf = (at) => new Date(at).toISOString().slice(0, 10)
 
-async function readIssue(ns, effortSlug, dir, file, born) {
+/**
+ * A barra do Gantt (ticket 04), destilada do catálogo. **Sólido é fato, hachurado é cerco:**
+ *
+ * - Se o servidor **observou** o ticket transicionar (`observations.length > 1`), a barra é
+ *   `medido` e vem **subdividida pelas colunas** que ele atravessou — é daí que sai o "tempo em
+ *   coluna". Cada faixa começa no instante em que o servidor confirmou aquela coluna (`at`), e
+ *   transições **dentro da mesma coluna** (`ready-for-agent → ready-for-human`) não a quebram.
+ * - Se ele **nunca** o viu andar, não há faixa nenhuma: o Gantt desenha a barra **hachurada**
+ *   sobre o intervalo do esforço (o `created`→`ended` do diretório, que o cliente já tem). O
+ *   hachurado é um intervalo que *contém* o fato, nunca um fato — é o que deixa os tickets
+ *   antigos aparecerem sem uma única data inventada.
+ *
+ * **Só os `at` de transição atravessam o fio, e eles são imóveis** (o instante em que
+ * `pronto → curso` aconteceu não se move com salvamento nenhum), então não ferem a supressão —
+ * ao contrário do `mtime`. O fim da barra (a resolução, ou "hoje" do ticket aberto) é conta do
+ * cliente: o último `at` já diz quando fechou, e "hoje" envelhece no relógio de quem olha.
+ */
+function projectBar(observations) {
+  if (observations.length <= 1) return { measured: false }
+  const segments = []
+  for (const { status, at } of observations) {
+    const column = columnOf(status)
+    if (segments.at(-1)?.column === column) continue
+    segments.push({ column, start: at })
+  }
+  return { measured: true, segments }
+}
+
+async function readIssue(ns, effortSlug, dir, file, history) {
   const path = join(dir, file)
   const { raw, at } = await readStamped(path)
   const { header, title } = parseDoc(raw)
   const status = normalizeStatus(header.status)
+  const number = /^(\d+)/.exec(file)?.[1] ?? ''
   return {
     at,
     issue: {
@@ -182,14 +211,7 @@ async function readIssue(ns, effortSlug, dir, file, born) {
       ref: refIn(ns, path),
       id: `${effortSlug}/${file}`,
       touched: dayOf(at),
-      // Quando a issue nasceu — e, por enquanto, **um piso**, nunca um fato: o servidor não
-      // observou nascimento nenhum, então o mais honesto que existe é "não antes do esforço"
-      // (o `born` do diretório). O `floor` viaja junto porque a tela tem que desenhar a
-      // incerteza (borda esquerda aberta no Gantt); o catálogo (ticket 05) é quem afia isso,
-      // issue a issue, virando `floor: false` nas que ele viu nascer. Sem piso disponível,
-      // `null` — o board não inventa data para ter o que mostrar.
-      created: born ? { day: born, floor: true } : null,
-      number: /^(\d+)/.exec(file)?.[1] ?? '',
+      number,
       title: title ?? file.replace(/\.md$/, ''),
       status,
       closed: isClosed(status),
@@ -197,11 +219,16 @@ async function readIssue(ns, effortSlug, dir, file, born) {
       type: header.type ?? null,
       repo: header.repo ?? null,
       blockedBy: parseBlockedBy(header['blocked by']),
+      // A projeção do catálogo para o Gantt. Sem catálogo (volume perdido, ou um contexto que
+      // não o passa), `observations()` devolve `[]` e a barra nasce hachurada — a degradação
+      // honesta que o PRD exige: perder o volume não zera o Gantt, só recolhe as barras ao
+      // cerco do disco.
+      bar: projectBar(history?.observations(ns.name, effortSlug, number) ?? []),
     },
   }
 }
 
-export async function readEffort(ns, root, slug) {
+export async function readEffort(ns, root, slug, history, archived = false) {
   const dir = join(root, slug)
   const issuesDir = join(dir, 'issues')
 
@@ -214,8 +241,12 @@ export async function readEffort(ns, root, slug) {
   // E ele pode atravessar o fio sem ferir a supressão porque é **imóvel**: dez salvamentos
   // depois, o campo é o mesmo byte. Num filesystem sem `birthtime` o stat devolve `0`, e aí
   // não se publica nada — ausência, nunca uma data inventada (1970 mentiria com confiança).
-  const { birthtimeMs } = await stat(dir)
+  // O `ctime` marca o `mv` do arquivamento (`rename` preserva o inode do diretório, mas mexe no
+  // `ctime`) — logo é o **fim real** de um esforço encerrado, direto do disco. Um esforço ativo
+  // não terminou: `ended` é `null`, e o Gantt estica o cerco até "hoje", que é do navegador.
+  const { birthtimeMs, ctimeMs } = await stat(dir)
   const born = birthtimeMs > 0 ? dayOf(birthtimeMs) : null
+  const ended = archived && ctimeMs > 0 ? dayOf(ctimeMs) : null
 
   let files = []
   try {
@@ -226,7 +257,7 @@ export async function readEffort(ns, root, slug) {
   // `orderIssues`. A ordem do array *é* a ordem da tela: o kanban (`public/effort.js`) filtra
   // por coluna, e `filter` preserva a ordem — então ordenar a lista uma vez, aqui, ordena
   // **dentro de cada coluna**, que é onde o olho procura.
-  const stamped = orderIssues(await Promise.all(files.map((f) => readIssue(ns, slug, issuesDir, f, born))))
+  const stamped = orderIssues(await Promise.all(files.map((f) => readIssue(ns, slug, issuesDir, f, history))))
   const issues = stamped.map((s) => s.issue)
 
   // Um item está bloqueado se qualquer issue que ele lista ainda não fechou. Uma
@@ -282,8 +313,12 @@ export async function readEffort(ns, root, slug) {
       ref: refIn(ns, dir),
       // A criação do esforço — o `born` acima, e este é **exato**, não piso: o diretório
       // nasceu quando nasceu. É a borda esquerda da barra-pai do Gantt global (ticket 04) e
-      // o piso que as issues herdam enquanto o catálogo não existe.
+      // o piso/cerco que as issues herdam para o hachurado.
       created: born,
+      // O fim do esforço, ou `null` enquanto ele vive. Junto com o `created`, é o **cerco** de
+      // disco em que as barras hachuradas (tickets nunca observados) se inscrevem — e a borda
+      // direita da barra-pai no Gantt global.
+      ended,
       docs,
       title: lede?.title ?? null,
       blurb: lede?.blurb ?? '',
@@ -316,13 +351,17 @@ async function listSlugs(root) {
 /**
  * A projeção de **uma** origem. Um root que não existe, ou que existe vazio, devolve um
  * board vazio — e vazio é um estado legítimo, que a tela sabe mostrar.
+ *
+ * O `history` é o catálogo, **lido** aqui para destilar a barra do Gantt de cada issue (ver
+ * `projectBar`). Continua não havendo cache nem HTTP neste módulo: o catálogo é uma leitura,
+ * como o disco. `undefined` degrada para barras hachuradas.
  */
-export async function buildBoard(ns) {
+export async function buildBoard(ns, history) {
   const archiveRoot = join(ns.root, 'archive')
   const [activeSlugs, archivedSlugs] = await Promise.all([listSlugs(ns.root), listSlugs(archiveRoot)])
   const [active, archived] = await Promise.all([
-    Promise.all(activeSlugs.map((s) => readEffort(ns, ns.root, s))),
-    Promise.all(archivedSlugs.map((s) => readEffort(ns, archiveRoot, s))),
+    Promise.all(activeSlugs.map((s) => readEffort(ns, ns.root, s, history, false))),
+    Promise.all(archivedSlugs.map((s) => readEffort(ns, archiveRoot, s, history, true))),
   ])
 
   // **Aqui o carimbo morre.** Ele ordenou, e o `.map()` o deixa para trás: o que sai desta

@@ -91,16 +91,20 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
   /** Quem está com o board aberto. Um `res` de SSE que nunca termina — **um por aba**, não por origem. */
   const clients = new Set()
 
-  /** Uma origem, e tudo que é dela: o board, a supressão, o digest, o watcher. */
-  const wires = new Map(
-    namespaces.map((ns) => [ns.name, { ns, cache: createCache(ns), unwatch: null }]),
-  )
-
   // O catálogo é **um**, e a origem vive na chave de cada linha. Ele não é por namespace
   // como o cache: o cache existe para uma origem não suprimir a outra, e isso é uma
   // propriedade do *push*. O catálogo só registra fatos, e fato de origem diferente não
   // interfere em fato de origem nenhuma.
+  //
+  // Nasce **antes** dos wires porque cada cache o recebe: o `buildBoard()` lê o catálogo para
+  // destilar a barra do Gantt de cada issue. É leitura pura — quem escreve no catálogo é o
+  // `sync()`, depois que o board foi lido.
   const history = await createHistory()
+
+  /** Uma origem, e tudo que é dela: o board, a supressão, o digest, o watcher. */
+  const wires = new Map(
+    namespaces.map((ns) => [ns.name, { ns, cache: createCache(ns, history), unwatch: null }]),
+  )
 
   // Os roots que o board pode ler. É o `safePath()` de sempre, agora generalizado às
   // origens descobertas — **e é só isso**: nenhuma política nova de `realpath`, nenhum
@@ -199,6 +203,14 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
     // segurança**, no AGENTS.md): um catálogo que para de gravar sem avisar é exatamente o
     // modo de falha que o push inteiro existe para não ter. Por isso o erro vai para o log do
     // container, mesmo sem subir.
+    //
+    // **A observação vem depois da leitura, e por isso a faixa nova do Gantt chega um ciclo
+    // depois.** O `refresh()` acima já leu o board com o catálogo **de antes** desta
+    // observação; a coluna (o chip do card, o kanban) muda na hora, porque vem do `Status:` do
+    // arquivo, mas a *faixa* correspondente na barra do Gantt só aparece no próximo `sync()` —
+    // a próxima escrita, ou a varredura de 90s. É um atraso de retaguarda numa tela
+    // retrospectiva, não um push fantasma: a faixa nova é uma mudança de board de verdade, e
+    // ela só existe porque uma transição de verdade aconteceu.
     try {
       await history.observe(name, [...board.efforts, ...board.archived], Date.now())
     } catch (err) {

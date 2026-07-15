@@ -66,6 +66,28 @@ export async function createHistory(dir = HISTORY) {
   const state = new Map()
 
   /**
+   * Por ticket: a **sequência ordenada** dos status que eu observei, cada um com o instante em
+   * que eu o confirmei (`at`). O `state` acima guarda só o último; isto guarda o caminho —
+   * é dele que o Gantt (ticket 04) tira a subdivisão da barra por coluna, o "tempo em coluna".
+   *
+   * O `at` de um status é o `before` da transição que entrou nele (para uma transição) ou o
+   * `at` do primeiro encontro (para um `seen`): o **limite esquerdo** confiável da faixa
+   * daquela coluna. Não é o nascimento do ticket nem o instante em que o arquivo foi escrito —
+   * é o instante em que o servidor viu aquele estado pela primeira vez.
+   *
+   * Como o `state`, é reconstruído do log na subida e vive só em memória: o log é a verdade
+   * durável, isto é o índice que o serve.
+   */
+  const trail = new Map()
+
+  // O `seen` **abre** a trilha (é o primeiro encontro, uma vez por ticket); o `move` a
+  // **estende**. Um `move` antes de qualquer `seen` não acontece — o servidor sempre vê o
+  // ticket parado antes de vê-lo andar —, mas se o log estiver assim, a trilha começa nele
+  // em vez de estourar.
+  const open = (key, status, at) => trail.set(key, [{ status, at }])
+  const extend = (key, status, at) => (trail.get(key) ?? trail.set(key, []).get(key)).push({ status, at })
+
+  /**
    * O último instante em que o servidor esteve vivo — e, por indução, o último em que ele viu
    * cada ticket no status registrado. É o que permite fechar a janela de uma transição que
    * aconteceu **enquanto ele estava fora**: ela caiu em algum ponto entre o batimento e
@@ -82,19 +104,25 @@ export async function createHistory(dir = HISTORY) {
 
   const replay = (ev) => {
     if (ev.kind === 'seen') {
-      state.set(keyOf(ev.ns, ev.e, ev.n), {
+      const key = keyOf(ev.ns, ev.e, ev.n)
+      state.set(key, {
         status: ev.status,
         since: { after: null, before: ev.at },
         lastSeen: null,
       })
+      open(key, ev.status, ev.at)
       return
     }
     if (ev.kind === 'move') {
-      state.set(keyOf(ev.ns, ev.e, ev.n), {
+      const key = keyOf(ev.ns, ev.e, ev.n)
+      state.set(key, {
         status: ev.to,
         since: { after: ev.after, before: ev.before },
         lastSeen: null,
       })
+      // A faixa da coluna nova começa quando eu a **confirmei** — o `before` —, não quando o
+      // ticket saiu da anterior (o `after`, que pode ser uma janela larga através de um restart).
+      extend(key, ev.to, ev.before)
     }
   }
 
@@ -150,6 +178,7 @@ export async function createHistory(dir = HISTORY) {
           const at = iso(now)
           events.push({ src: 'medido', kind: 'seen', ns, e: effort.slug, n: issue.number, status: issue.status, at })
           state.set(key, { status: issue.status, since: { after: null, before: at }, lastSeen: now })
+          open(key, issue.status, at)
           continue
         }
 
@@ -175,6 +204,7 @@ export async function createHistory(dir = HISTORY) {
           before,
         })
         state.set(key, { status: issue.status, since: { after, before }, lastSeen: now })
+        extend(key, issue.status, before)
       }
     }
 
@@ -194,9 +224,21 @@ export async function createHistory(dir = HISTORY) {
     return entry ? { status: entry.status, since: entry.since } : null
   }
 
+  /**
+   * A sequência de status observados de um ticket, do primeiro encontro até agora — cada um
+   * com o instante em que entrou nele. **Lista vazia** para um ticket que o catálogo nunca
+   * viu: é uma resposta legítima, e o Gantt a desenha como uma barra hachurada (o disco
+   * *cerca* o fato, mas ninguém o observou).
+   *
+   * Uma cópia, nunca o array interno: quem lê o catálogo não pode mutar a memória dele.
+   */
+  const observations = (ns, slug, number) =>
+    (trail.get(keyOf(ns, slug, number)) ?? []).map((o) => ({ ...o }))
+
   return {
     observe,
     of,
+    observations,
     // Devolve a string ISO do último batimento, ou `null` se não houver.
     // `lastSeen` é sempre `number | null` em memória; a conversão sai aqui.
     get alive() {

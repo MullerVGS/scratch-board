@@ -147,6 +147,50 @@ test('o ticket nunca visto tem limite inferior desconhecido, e o board não inve
   assert.equal(since.before, new Date(1000).toISOString())
 })
 
+test('observations() devolve a sequência de status observados, cada um com o instante em que entrou nele', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'hist-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const h = await createHistory(dir)
+  await h.observe('projetos', [effort('eixo', ['01', 'ready-for-agent'])], 1000)
+  await h.observe('projetos', [effort('eixo', ['01', 'ready-for-agent'])], 2000)
+  await h.observe('projetos', [effort('eixo', ['01', 'claimed'])], 3000)
+  await h.observe('projetos', [effort('eixo', ['01', 'resolved'])], 5000)
+
+  // Cada linha do Gantt é uma issue; cada faixa dela é uma coluna. O `at` de um status é o
+  // instante em que o servidor **confirmou** aquele estado — o `before` da transição —, e é o
+  // limite esquerdo da faixa daquela coluna. Ninguém afirma um instante que não viu.
+  const obs = h.observations('projetos', 'eixo', '01')
+  assert.deepEqual(obs, [
+    { status: 'ready-for-agent', at: new Date(1000).toISOString() },
+    { status: 'claimed', at: new Date(3000).toISOString() },
+    { status: 'resolved', at: new Date(5000).toISOString() },
+  ])
+})
+
+test('observations() de um ticket que o catálogo nunca viu é uma lista vazia, não uma exceção', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'hist-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const h = await createHistory(dir)
+  assert.deepEqual(h.observations('projetos', 'eixo', '99'), [])
+})
+
+test('a sequência observada sobrevive à subida — o Gantt a relê do log', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'hist-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const first = await createHistory(dir)
+  await first.observe('projetos', [effort('eixo', ['01', 'ready-for-agent'])], 1000)
+  await first.observe('projetos', [effort('eixo', ['01', 'claimed'])], 3000)
+
+  const second = await createHistory(dir)
+  assert.deepEqual(second.observations('projetos', 'eixo', '01'), [
+    { status: 'ready-for-agent', at: new Date(1000).toISOString() },
+    { status: 'claimed', at: new Date(3000).toISOString() },
+  ])
+})
+
 test('arquivo `alive` com data inválida é descartado silenciosamente, não lança', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'hist-'))
   t.after(() => rm(dir, { recursive: true, force: true }))

@@ -171,17 +171,41 @@ test('a história sobrevive ao restart, e ao arquivamento do esforço', async (t
   assert.equal(got[0].kind, 'seen')
 })
 
-test('o board serializado não ganhou campo nenhum', async (t) => {
-  const { root } = await bootstrap()
+test('o Gantt atravessa o fio como fato imóvel, e o estado interno do catálogo não', async (t) => {
+  const { ns, root } = await bootstrap()
   await put(root, 'eixo/issues/01-um.md', issueDoc('Um', 'ready-for-agent'))
   const s = await boot(t)
+  await until(ns, 1) // o servidor registra o `seen`
 
-  const board = await (await fetch(`http://127.0.0.1:${s.port}/api/board`)).text()
-  // O catálogo é estado do **servidor**. Ele não atravessa o fio neste ticket — quem o
-  // consome é o 03 (o rótulo) e o 04 (o Gantt). Um campo instável no payload mata o push.
-  assert.doesNotMatch(board, /mtime/)
-  assert.doesNotMatch(board, /"since"/)
-  assert.doesNotMatch(board, /"alive"/)
+  // O ticket transiciona: `ready-for-agent → claimed`. O catálogo grava a segunda linha (o
+  // `move`) — e é a partir daí que a barra do Gantt sabe que ele foi **observado**.
+  await put(root, 'eixo/issues/01-um.md', issueDoc('Um', 'claimed'))
+  await until(ns, 2)
+
+  // Uma leitura depois de a transição ter sido observada: o `buildBoard()` relê o catálogo e
+  // destila a barra medida. (A observação vem *depois* da leitura no mesmo `sync()`, então a
+  // faixa nova aparece no ciclo seguinte — este `/api/board` é esse ciclo.)
+  const raw = await (await fetch(`http://127.0.0.1:${s.port}/api/board`)).text()
+  const board = JSON.parse(raw).boards[ns]
+  const issue = board.efforts.find((e) => e.slug === 'eixo').issues.find((i) => i.number === '01')
+
+  // Sólido é fato: o servidor viu transicionar, então a barra vem **medida e subdividida** pelas
+  // colunas que o ticket atravessou — `pronto` (ready-for-agent) e `curso` (claimed).
+  assert.equal(issue.bar.measured, true, 'o ticket observado transicionando sai medido')
+  assert.deepEqual(
+    issue.bar.segments.map((seg) => seg.column),
+    ['pronto', 'curso'],
+    'a barra se subdivide pelas colunas percorridas',
+  )
+  // O carimbo de cada faixa é o instante **imóvel** da transição (ISO absoluto), não o `mtime`
+  // volátil: ele atravessa o fio sem mover o hash. É o que o ticket 04 pode fazer e o 02 não.
+  for (const seg of issue.bar.segments) assert.match(seg.start, /^\d{4}-\d{2}-\d{2}T/)
+
+  // E o estado **interno** do catálogo continua fora do fio: um campo instável (`mtime`) ou os
+  // nomes internos (`since`, `alive`) matariam a supressão do push.
+  assert.doesNotMatch(raw, /mtime/)
+  assert.doesNotMatch(raw, /"since"/)
+  assert.doesNotMatch(raw, /"alive"/)
 })
 
 test('o catálogo é best-effort: a escrita dele falhando não derruba o board nem o processo', async (t) => {

@@ -1,122 +1,221 @@
 /**
- * Os invariantes do Gantt — o grafo com o X virando tempo.
+ * Os invariantes do Gantt do esforço, refeito sobre o catálogo — **sólido é fato, hachurado
+ * é cerco.**
  *
  * O precedente é o `graph-layout.test.js`, e ele já pagou: foi o teste do layout puro que
  * pegou o bug real do ciclo, numa linha que o `AGENTS.md` jurava que funcionava. Aqui os
- * invariantes são os do tempo, e todos falham em **silêncio** no navegador — a barra sai,
- * só sai mentindo:
+ * invariantes são os do tempo, e todos falham em **silêncio** no navegador — a barra sai, só
+ * sai mentindo:
  *
- *   - nenhuma barra começa depois de terminar, nem quando o disco contradiz o piso;
+ *   - nenhuma barra começa depois de terminar, nem quando o disco contradiz o cerco;
  *   - nenhuma seta anda para trás no tempo;
- *   - início incerto (piso) se distingue de início exato — e ausência de data não vira
- *     data inventada;
- *   - ticket aberto corre até hoje; ticket fechado termina quando terminou;
+ *   - a barra **hachurada** (nunca observada) se distingue da **sólida** (medida), e o
+ *     intervalo do esforço que a **cerca** a contém;
+ *   - ticket aberto corre até "hoje", e "hoje" é de quem olha — entra por parâmetro;
+ *   - um ticket de **20 minutos** é uma fatia entre duas horas, com largura proporcional, e
+ *     não uma lasca arredondada para a hora cheia — e o piso de legibilidade não achata duas
+ *     durações sub-hora diferentes no mesmo tamanho;
+ *   - a **mesma** função, chamada com escala de **dia**, produz as posições do Gantt global —
+ *     a escala é parâmetro, não um `if`;
  *   - ciclo no `Blocked by:` não estoura.
- *
- * O "hoje" entra por parâmetro, como o `now` do `staleLabel()`: a conta é pura e não há
- * relógio a mockar.
  */
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { numberIndex, depsOf } from '../public/issues.js'
-import { ganttLayout, arrowPath, BAR_H, LABEL_W, PAD } from '../public/gantt-layout.js'
+import { numberIndex } from '../public/issues.js'
+import {
+  ganttLayout,
+  arrowPath,
+  HOUR_W,
+  DAY_W,
+  BAR_H,
+  LABEL_W,
+  PAD,
+  MIN_BAR_W,
+} from '../public/gantt-layout.js'
+
+const HOUR = 3600e3
+const DAY = 864e5
+
+/** O relógio de quem olha, e o cerco do esforço (o `created`→`ended` do diretório). */
+const T0 = Date.parse('2026-07-10T00:00:00.000Z') // o esforço nasceu aqui
+const NOW = Date.parse('2026-07-14T00:00:00.000Z')
+const FLOOR = { start: T0, end: NOW }
+
+/** px por milissegundo: a escala. Horas para o Gantt do esforço, dias para o global. */
+const HOUR_PX = HOUR_W / HOUR
+const DAY_PX = DAY_W / DAY
 
 /**
- * Uma issue como o `/api/board` a serializa — só os campos que o layout olha. O `created`
- * chega como o servidor o manda: `{ day, floor }`, ou `null` quando nem piso existe.
+ * Uma issue como o `/api/board` a serializa — só o que o layout olha. A `bar` é a projeção do
+ * catálogo: `{ measured, segments }` para o que o servidor observou, `{ measured: false }`
+ * para o que ele só cercou.
  */
-const issue = (number, { blockedBy = [], closed = false, touched, created } = {}) => ({
+const at = (ms) => new Date(ms).toISOString()
+const measured = (...segments) => ({ measured: true, segments })
+const seg = (column, startMs) => ({ column, start: at(startMs) })
+const cercado = { measured: false }
+
+const issue = (number, { blockedBy = [], closed = false, status, bar = cercado } = {}) => ({
   number,
   title: `${number} — issue ${number}`,
-  status: closed ? 'resolved' : 'ready-for-agent',
+  status: status ?? (closed ? 'resolved' : 'ready-for-agent'),
   closed,
   blocked: false,
   blockedBy: blockedBy.map((n) => ({ number: n, note: `prosa do ${n}`, raw: n })),
-  touched,
-  created,
+  bar,
 })
 
-const HOJE = '2026-07-14'
-const piso = (day) => ({ day, floor: true })
-const exato = (day) => ({ day, floor: false })
-
-const layout = (issues, today = HOJE) => ganttLayout(issues, numberIndex(issues), today)
+const layout = (issues, opts = {}) =>
+  ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: HOUR_PX, floor: FLOOR, ...opts })
 const barOf = (l, number) => l.bars.find((b) => b.issue.number === number)
 
 describe('as bordas da barra são fatos, e apontam para o lado certo', () => {
   test('nenhuma barra começa depois de terminar', () => {
     const l = layout([
-      issue('01', { closed: true, touched: '2026-07-11', created: piso('2026-07-10') }),
-      issue('02', { closed: true, touched: '2026-07-13', created: piso('2026-07-10') }),
-      issue('03', { touched: '2026-07-13', created: piso('2026-07-10') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0 + HOUR), seg('fechado', T0 + 3 * HOUR)) }),
+      issue('02', { bar: measured(seg('pronto', T0 + 2 * HOUR)) }),
+      issue('03', { closed: true }), // cercado: hachurado sobre o esforço
     ])
     for (const b of l.bars) assert.ok(b.w >= 0, `a barra ${b.issue.number} tem largura negativa`)
   })
 
-  test('nem quando o disco contradiz o piso (um `cp -p` fabrica mtime anterior ao diretório)', () => {
-    // O piso jura `created ≥ birthtime do diretório`, mas o disco pode mentir — um arquivo
-    // copiado com `-p` para um diretório novo tem mtime mais velho que o `mkdir`. A barra
-    // não repete a mentira: ela se recolhe à borda direita em vez de nascer negativa.
-    const l = layout([issue('01', { closed: true, touched: '2026-07-08', created: piso('2026-07-14') })])
-    const b = barOf(l, '01')
-    assert.ok(b.w >= 0, 'a contradição do disco não pode virar largura negativa')
+  test('nem quando o disco contradiz o cerco (um esforço cujo `ended` é anterior ao `created`)', () => {
+    // O `ended` (ctime do `mv`) jura ser posterior ao `created` (birthtime), mas um relógio
+    // trocado, um `cp -p`, pode inverter os dois. A barra hachurada não repete a mentira: ela
+    // se recolhe em vez de nascer negativa.
+    const invertido = { start: NOW, end: T0 }
+    const l = layout([issue('01', { closed: true })], { floor: invertido })
+    assert.ok(barOf(l, '01').w >= 0, 'a contradição do disco não pode virar largura negativa')
   })
 
-  test('ticket fechado tem borda direita real: quem fechou depois termina mais à direita', () => {
+  test('ticket fechado termina na resolução — o último carimbo observado', () => {
     const l = layout([
-      issue('01', { closed: true, touched: '2026-07-11', created: piso('2026-07-10') }),
-      issue('02', { closed: true, touched: '2026-07-12', created: piso('2026-07-10') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 2 * HOUR)) }),
+      issue('02', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 5 * HOUR)) }),
     ])
     const [b01, b02] = [barOf(l, '01'), barOf(l, '02')]
-    assert.equal(b02.x + b02.w - (b01.x + b01.w), l.dayW, 'um dia de diferença é um dayW de diferença')
+    // 02 fechou 3h depois de 01: a borda direita fica 3h * HOUR_W à direita.
+    assert.ok(Math.abs(b02.x + b02.w - (b01.x + b01.w) - 3 * HOUR_W) < 0.5, 'a resolução é ao minuto, não à hora')
   })
 
-  test('ticket aberto corre até hoje — e "hoje" é de quem olha, não do layout', () => {
-    const issues = () => [issue('01', { touched: '2026-07-10', created: piso('2026-07-10') })]
-    const hoje = barOf(layout(issues(), '2026-07-14'), '01')
-    const amanha = barOf(layout(issues(), '2026-07-15'), '01')
-    assert.equal(amanha.w - hoje.w, layout(issues(), '2026-07-15').dayW, 'a barra aberta cresce com o relógio')
+  test('ticket aberto corre até "hoje" — e "hoje" é de quem olha, não do layout', () => {
+    const issues = () => [issue('01', { bar: measured(seg('curso', T0 + HOUR)) })]
+    const hoje = barOf(layout(issues()), '01')
+    const amanha = barOf(layout(issues(), { now: NOW + DAY }), '01')
     assert.ok(hoje.open, 'a barra de ticket aberto se declara aberta')
+    assert.ok(Math.abs(amanha.w - hoje.w - DAY * HOUR_PX) < 0.5, 'a barra aberta cresce com o relógio')
   })
 })
 
-describe('piso não é fato, e a barra diz isso', () => {
-  test('início incerto se distingue de início exato', () => {
+describe('sólido é fato, hachurado é cerco', () => {
+  test('a barra medida é sólida; a nunca observada é hachurada', () => {
     const l = layout([
-      issue('01', { closed: true, touched: '2026-07-12', created: piso('2026-07-10') }),
-      issue('02', { closed: true, touched: '2026-07-12', created: exato('2026-07-11') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0 + HOUR), seg('fechado', T0 + 4 * HOUR)) }),
+      issue('02', { closed: true }), // o servidor nunca viu: só o disco cerca
     ])
-    assert.equal(barOf(l, '01').floor, true, 'piso viaja como piso')
-    assert.equal(barOf(l, '02').floor, false, 'o exato do catálogo (ticket 05) entra como fato')
+    assert.equal(barOf(l, '01').kind, 'solid', 'o que o servidor observou é fato')
+    assert.equal(barOf(l, '02').kind, 'hatched', 'o que ele só cercou é hachura')
   })
 
-  test('ausência de data não vira data inventada', () => {
-    // Sem `created` nenhum (filesystem sem birthtime), a barra não nasce em 1970 nem no
-    // início do esforço vizinho: ela se ancora na única data que existe — a própria borda
-    // direita — e se declara incerta.
+  test('o intervalo do esforço cerca as barras que ele contém', () => {
     const l = layout([
-      issue('01', { closed: true, touched: '2026-07-12', created: exato('2026-07-01') }),
-      issue('02', { closed: true, touched: '2026-07-12', created: null }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0 + 2 * HOUR), seg('fechado', T0 + 6 * HOUR)) }),
+      issue('02', { closed: true }),
     ])
-    const b = barOf(l, '02')
-    assert.equal(b.floor, true, 'sem data, o início é incerto por definição')
-    assert.ok(b.x > barOf(l, '01').x, 'a barra sem data não pode herdar o início de ninguém')
-    assert.ok(b.w <= l.dayW, 'a barra sem início conhecido não estica sobre dias que ninguém mediu')
+    const cerco = l.cerco
+    assert.ok(cerco.w > 0, 'o cerco tem largura — o esforço durou')
+    for (const b of l.bars) {
+      assert.ok(b.x >= cerco.x - 0.5, `a barra ${b.issue.number} começa antes do esforço`)
+      assert.ok(b.x + b.w <= cerco.x + cerco.w + 0.5, `a barra ${b.issue.number} termina depois do esforço`)
+    }
+  })
+
+  test('a barra hachurada abrange o cerco de ponta a ponta — "aconteceu em algum lugar aqui dentro"', () => {
+    const l = layout([issue('01', { closed: true })])
+    const b = barOf(l, '01')
+    assert.ok(Math.abs(b.x - l.cerco.x) < 0.5, 'a hachura começa onde o esforço começou')
+    assert.ok(Math.abs(b.x + b.w - (l.cerco.x + l.cerco.w)) < 0.5, 'e termina onde o esforço terminou')
+  })
+
+  test('a barra medida se subdivide pelas colunas que o servidor viu', () => {
+    const l = layout([
+      issue('01', {
+        closed: true,
+        bar: measured(seg('pronto', T0 + HOUR), seg('curso', T0 + 3 * HOUR), seg('fechado', T0 + 4 * HOUR)),
+      }),
+    ])
+    const b = barOf(l, '01')
+    // pronto [+1h,+3h] e curso [+3h,+4h]; a faixa 'fechado' tem largura zero (o ticket não
+    // passa tempo em "fechado" — ele termina ali) e não vira retângulo.
+    const cols = b.segments.map((s) => s.column)
+    assert.deepEqual(cols, ['pronto', 'curso'], 'as faixas são as colunas percorridas, sem a de largura zero')
+    assert.ok(Math.abs(b.segments[0].w - 2 * HOUR_W) < 0.5, 'pronto durou duas horas')
+    assert.ok(Math.abs(b.segments[1].w - 1 * HOUR_W) < 0.5, 'curso durou uma hora')
+    // As faixas ladrilham a barra: a soma bate com a largura total.
+    assert.ok(Math.abs(b.segments.reduce((a, s) => a + s.w, 0) - b.w) < 0.5, 'as faixas ladrilham a barra')
+  })
+
+  test('a barra hachurada não tem faixas — o board não fabrica uma transição que ninguém viu', () => {
+    const l = layout([issue('01', { closed: true })])
+    assert.equal(barOf(l, '01').segments.length, 0)
+  })
+})
+
+describe('a fatia entre duas horas — a precisão sub-dia que o carimbo imóvel deu', () => {
+  test('um ticket de 20 minutos é uma fatia proporcional, não uma lasca arredondada para a hora', () => {
+    // Nasce e resolve dentro da MESMA hora do eixo: 14:10 → 14:30 do dia +4h.
+    const ini = T0 + 4 * HOUR + 10 * 60e3
+    const l = layout([issue('01', { closed: true, bar: measured(seg('curso', ini), seg('fechado', ini + 20 * 60e3)) })])
+    const b = barOf(l, '01')
+    assert.ok(Math.abs(b.w - 20 * 60e3 * HOUR_PX) < 0.5, 'a largura é a dos 20 minutos, ao minuto')
+    assert.ok(b.w < HOUR_W, 'não foi arredondada para a hora cheia')
+    // "começa e termina dentro da mesma hora do eixo": as duas bordas caem no mesmo balde de
+    // hora (o eixo alinha os tiques às horas UTC, e o domínio começa na meia-noite T0).
+    assert.equal(
+      Math.floor((b.start - T0) / HOUR),
+      Math.floor((b.end - 1 - T0) / HOUR),
+      'a fatia não atravessa uma fronteira de hora do eixo',
+    )
+  })
+
+  test('duas durações sub-hora diferentes têm larguras diferentes — o piso não as achata', () => {
+    const ini = T0 + 4 * HOUR
+    const vinte = layout([issue('01', { closed: true, bar: measured(seg('curso', ini), seg('fechado', ini + 20 * 60e3)) })])
+    const quarenta = layout([issue('01', { closed: true, bar: measured(seg('curso', ini), seg('fechado', ini + 45 * 60e3)) })])
+    const w20 = barOf(vinte, '01').w
+    const w45 = barOf(quarenta, '01').w
+    assert.ok(w20 >= MIN_BAR_W && w45 >= MIN_BAR_W, 'nenhuma some abaixo do piso de legibilidade')
+    assert.ok(w45 > w20, 'a de 45 min é mais larga que a de 20 min — a proporção sobrevive ao piso')
+  })
+})
+
+describe('a escala é parâmetro: a mesma função serve o esforço (horas) e o global (dias)', () => {
+  test('trocar a escala de hora para dia reescala as posições, sem um `if` no meio', () => {
+    const issues = [
+      issue('01', { closed: true, bar: measured(seg('pronto', T0 + DAY), seg('fechado', T0 + 3 * DAY)) }),
+      issue('02', { bar: measured(seg('curso', T0 + 2 * DAY)) }),
+    ]
+    const emHoras = ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: HOUR_PX, floor: FLOOR })
+    const emDias = ganttLayout(issues, numberIndex(issues), { now: NOW, pxPerMs: DAY_PX, floor: FLOOR })
+
+    const dxH = barOf(emHoras, '01').x - LABEL_W - PAD
+    const dxD = barOf(emDias, '01').x - LABEL_W - PAD
+    // A mesma issue, o mesmo instante: só a escala mudou. O deslocamento é proporcional a ela.
+    assert.ok(dxH > 0 && dxD > 0)
+    assert.ok(Math.abs(dxH / dxD - HOUR_PX / DAY_PX) < 1e-6, 'a posição escala com pxPerMs')
+    assert.ok(Math.abs(barOf(emHoras, '01').w / barOf(emDias, '01').w - HOUR_PX / DAY_PX) < 1e-6, 'a largura também')
   })
 })
 
 describe('as setas do Blocked by:', () => {
   test('nenhuma seta anda para trás no tempo', () => {
-    // O leque da fatia 1: todas as barras nascem do mesmo piso, e o bloqueante fecha DEPOIS
-    // de o bloqueado "começar". A seta não pode voltar: ela sai da resolução do bloqueante
-    // e entra na barra do bloqueado dali em diante.
     const issues = [
-      issue('01', { closed: true, touched: '2026-07-12', created: piso('2026-07-10') }),
-      issue('02', { blockedBy: ['01'], touched: '2026-07-13', created: piso('2026-07-10') }),
-      issue('03', { blockedBy: ['01', '02'], touched: '2026-07-13', created: piso('2026-07-10') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 3 * HOUR)) }),
+      issue('02', { blockedBy: ['01'], bar: measured(seg('curso', T0 + 3 * HOUR)) }),
+      issue('03', { blockedBy: ['01', '02'], bar: measured(seg('curso', T0 + 4 * HOUR)) }),
     ]
     const l = layout(issues)
     assert.equal(l.arrows.length, 3)
@@ -127,23 +226,21 @@ describe('as setas do Blocked by:', () => {
 
   test('a prosa do bloqueio viaja com a seta — é ela que o tooltip devolve', () => {
     const issues = [
-      issue('01', { closed: true, touched: '2026-07-12', created: piso('2026-07-10') }),
-      issue('02', { blockedBy: ['01'], touched: '2026-07-13', created: piso('2026-07-10') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 3 * HOUR)) }),
+      issue('02', { blockedBy: ['01'], bar: measured(seg('curso', T0 + 3 * HOUR)) }),
     ]
     const [a] = layout(issues).arrows
     assert.equal(a.note, 'prosa do 01')
     assert.equal(a.blocking, false, 'bloqueante fechado é história cumprida, não bloqueio vivo')
   })
 
-  test('bloqueado que fechou ANTES do bloqueante: a seta continua sem voltar, mesmo que aponte para o vazio', () => {
-    // Dado anômalo mas possível (um `Blocked by:` acrescentado tarde, um mtime fabricado):
-    // o 02 resolveu antes de o 01 — que o "bloqueia" — fechar. "Nunca para trás no tempo" e
-    // "entra na barra" ficam inconciliáveis, e a primeira é acceptance criteria: a seta sai
-    // da resolução do bloqueante e aponta além da barra do bloqueado. A contradição do
-    // disco fica visível em vez de redesenhada.
+  test('bloqueado que fechou ANTES do bloqueante: a seta continua sem voltar', () => {
+    // Dado anômalo mas possível (um `Blocked by:` acrescentado tarde): o 02 resolveu antes de
+    // o 01 fechar. "Nunca para trás no tempo" é acceptance criteria: a seta sai da resolução do
+    // bloqueante e aponta além da barra do bloqueado. A contradição do disco fica visível.
     const issues = [
-      issue('01', { closed: true, touched: '2026-07-13', created: piso('2026-07-10') }),
-      issue('02', { blockedBy: ['01'], closed: true, touched: '2026-07-11', created: piso('2026-07-10') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 5 * HOUR)) }),
+      issue('02', { blockedBy: ['01'], closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 2 * HOUR)) }),
     ]
     const l = layout(issues)
     const [a] = l.arrows
@@ -153,14 +250,14 @@ describe('as setas do Blocked by:', () => {
   })
 
   test('referência a issue inexistente não vira seta', () => {
-    const issues = [issue('01', { blockedBy: ['99'], touched: '2026-07-13', created: piso('2026-07-10') })]
+    const issues = [issue('01', { blockedBy: ['99'], bar: measured(seg('curso', T0 + HOUR)) })]
     assert.deepEqual(layout(issues).arrows, [])
   })
 
   test('ciclo no Blocked by: não estoura', () => {
     const issues = [
-      issue('01', { blockedBy: ['02'], touched: '2026-07-13', created: piso('2026-07-10') }),
-      issue('02', { blockedBy: ['01'], touched: '2026-07-13', created: piso('2026-07-10') }),
+      issue('01', { blockedBy: ['02'], bar: measured(seg('curso', T0 + HOUR)) }),
+      issue('02', { blockedBy: ['01'], bar: measured(seg('curso', T0 + HOUR)) }),
     ]
     const l = layout(issues)
     assert.equal(l.bars.length, 2)
@@ -172,7 +269,6 @@ describe('as setas do Blocked by:', () => {
   })
 
   test('o caminho da seta é finito mesmo na vertical pura', () => {
-    // No leque, a seta cai da ponta do bloqueante direto sobre a barra de baixo: x1 === x2.
     const d = arrowPath({ x1: 100, y1: 40, x2: 100, y2: 80 })
     assert.match(d, /^M 100 40 C /)
     assert.equal(/NaN|Infinity/.test(d), false)
@@ -182,48 +278,49 @@ describe('as setas do Blocked by:', () => {
 describe('as linhas contam a história na ordem em que ela aconteceu', () => {
   test('fechadas saem na ordem da resolução, não na do número', () => {
     const l = layout([
-      issue('01', { closed: true, touched: '2026-07-12', created: piso('2026-07-10') }),
-      issue('02', { closed: true, touched: '2026-07-11', created: piso('2026-07-10') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 4 * HOUR)) }),
+      issue('02', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 2 * HOUR)) }),
     ])
     assert.ok(barOf(l, '02').y < barOf(l, '01').y, 'quem fechou primeiro vem primeiro')
   })
 
   test('as abertas correm até hoje e afundam para o fim', () => {
     const l = layout([
-      issue('01', { touched: '2026-07-13', created: piso('2026-07-10') }),
-      issue('02', { closed: true, touched: '2026-07-13', created: piso('2026-07-10') }),
+      issue('01', { bar: measured(seg('curso', T0 + HOUR)) }),
+      issue('02', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 5 * HOUR)) }),
     ])
-    assert.ok(barOf(l, '02').y < barOf(l, '01').y, 'a fechada de hoje termina; a aberta continua')
+    assert.ok(barOf(l, '02').y < barOf(l, '01').y, 'a fechada termina; a aberta continua')
   })
 })
 
-describe('o eixo de datas', () => {
-  test('os tiques são dias, andam para a direita e cabem no domínio', () => {
+describe('o eixo de tempo', () => {
+  test('os tiques andam para a direita e cabem no domínio', () => {
     const l = layout([
-      issue('01', { closed: true, touched: '2026-07-12', created: piso('2026-07-04') }),
-      issue('02', { touched: '2026-07-13', created: piso('2026-07-04') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 6 * HOUR)) }),
+      issue('02', { bar: measured(seg('curso', T0 + 2 * HOUR)) }),
     ])
     assert.ok(l.ticks.length >= 2)
-    assert.equal(l.ticks[0].day, '2026-07-04', 'o eixo começa onde a primeira barra começa')
-    for (const t of l.ticks) assert.match(t.day, /^\d{4}-\d{2}-\d{2}$/)
     for (let i = 1; i < l.ticks.length; i++) assert.ok(l.ticks[i].x > l.ticks[i - 1].x)
-    const fim = l.ticks.at(-1)
-    assert.ok(fim.x <= l.width - PAD, 'nenhum tique vaza do desenho')
+    assert.ok(l.ticks.at(-1).x <= l.width - PAD, 'nenhum tique vaza do desenho')
   })
 
-  test('um esforço longo não vira um tique por dia — o passo cresce com o vão', () => {
-    const l = layout([
-      issue('01', { closed: true, touched: '2026-07-01', created: piso('2026-03-01') }),
-      issue('02', { touched: '2026-07-01', created: piso('2026-03-01') }),
-    ])
-    assert.ok(l.ticks.length <= 24, `${l.ticks.length} tiques não se leem — o passo tem que crescer`)
+  test('um vão longo não vira um tique por hora — o passo cresce', () => {
+    const l = layout([issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 40 * DAY)) })], {
+      floor: { start: T0, end: T0 + 40 * DAY },
+    })
+    assert.ok(l.ticks.length <= 30, `${l.ticks.length} tiques não se leem — o passo tem que crescer`)
   })
 
-  test('a linha de "hoje" existe enquanto houver barra correndo — e some num esforço já encerrado', () => {
-    const correndo = layout([issue('01', { touched: '2026-07-13', created: piso('2026-07-10') })])
-    assert.equal(correndo.todayX, correndo.width - PAD, 'hoje é a borda direita de quem ainda corre')
+  test('a linha de "hoje" existe enquanto houver barra correndo — e some num esforço encerrado', () => {
+    const correndo = layout([issue('01', { bar: measured(seg('curso', T0 + HOUR)) })])
+    assert.ok(correndo.todayX !== null, 'hoje tem lugar quando algo ainda corre')
 
-    const encerrado = layout([issue('01', { closed: true, touched: '2026-07-10', created: piso('2026-07-08') })])
+    // Esforço encerrado no passado: todas fechadas, cerco terminando antes de "hoje".
+    const passado = { start: T0, end: T0 + 6 * HOUR }
+    const encerrado = layout(
+      [issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 5 * HOUR)) })],
+      { floor: passado },
+    )
     assert.equal(encerrado.todayX, null, 'um desenho todo no passado não tem onde pôr o "hoje"')
   })
 
@@ -238,9 +335,9 @@ describe('o eixo de datas', () => {
 describe('a geometria que o desenho assume', () => {
   test('as linhas se empilham a passo fixo, e a barra referencia a issue que a origina', () => {
     const l = layout([
-      issue('01', { closed: true, touched: '2026-07-11', created: piso('2026-07-10') }),
-      issue('02', { closed: true, touched: '2026-07-12', created: piso('2026-07-10') }),
-      issue('03', { touched: '2026-07-13', created: piso('2026-07-10') }),
+      issue('01', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 2 * HOUR)) }),
+      issue('02', { closed: true, bar: measured(seg('pronto', T0), seg('fechado', T0 + 3 * HOUR)) }),
+      issue('03', { bar: measured(seg('curso', T0 + HOUR)) }),
     ])
     const passo = l.bars[1].y - l.bars[0].y
     assert.equal(l.bars[2].y - l.bars[1].y, passo, 'o passo entre linhas é constante')
@@ -252,9 +349,6 @@ describe('a geometria que o desenho assume', () => {
 
 describe('o layout é puro', () => {
   test('`gantt-layout.js` não toca no DOM nem arrasta módulo impuro', () => {
-    // O mesmo guarda do grafo: se o módulo passar a olhar `document`, os invariantes acima
-    // voltam a ser indemonstráveis fora do navegador — e é assim que eles morrem. A
-    // varredura é no *código*, com os comentários fora.
     const code = readFileSync(new URL('../public/gantt-layout.js', import.meta.url), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/.*$/gm, '')
@@ -270,8 +364,6 @@ describe('o layout é puro', () => {
   })
 
   test('e não tem relógio dentro: o "hoje" entra por parâmetro', () => {
-    // Um `Date.now()` aqui dentro faria o desenho depender de quando ele rodou — e o teste
-    // inteiro viraria loteria de meia-noite. Quem sabe que horas são é quem desenha.
     const code = readFileSync(new URL('../public/gantt-layout.js', import.meta.url), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/.*$/gm, '')

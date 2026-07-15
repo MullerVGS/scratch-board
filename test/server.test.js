@@ -759,45 +759,48 @@ test('e os salvamentos seguintes — com ele já em primeiro — não movem o bo
 // O `created` do Gantt: um piso por dia, e ele viaja marcado como piso
 // ---------------------------------------------------------------------------
 //
-// A borda esquerda de uma barra do Gantt é o `created` — e, enquanto o catálogo não existe,
-// ele é um **piso**: o `birthtime` do *diretório* do esforço, que é uma data de criação de
-// verdade (o `mkdir` acontece uma vez, e o `Write` atômico de um `.md` lá dentro não toca o
-// inode do diretório). O payload carrega o fato **e a incerteza**: um piso nunca pode chegar
-// à tela vestido de data exata — data podre mente com mais confiança que a ausência dela.
+// O **cerco** de uma barra do Gantt é o `created`→`ended` do *diretório* do esforço: o
+// `birthtime` (uma data de criação de verdade — o `mkdir` acontece uma vez, e o `Write`
+// atômico de um `.md` lá dentro não toca o inode do diretório) e o `ctime` do `mv` de
+// arquivamento (o fim real de um esforço terminado). São dias UTC, e viajam porque são
+// **estáveis**: dez escritas depois, o campo é o mesmo byte, e o hash da supressão nem percebe.
 //
-// E ele pode viajar porque é **estável**: o `birthtime` de um diretório não se move nunca —
-// nem com salvamento, nem com a varredura. Dez escritas depois, o campo é o mesmo byte, e o
-// hash da supressão nem percebe que ele existe.
+// O **piso por-issue morreu com o leque** (ver o PRD, "O que morre"): a issue não carrega mais
+// um `created` próprio herdado igualmente por todas. O que ela carrega agora é a **barra** do
+// catálogo (`bar`), medida quando o servidor a viu transicionar, cercada quando não.
 
-test('a issue carrega o `created` — o piso do diretório do esforço, marcado como piso', async () => {
+test('o esforço carrega `created`/`ended`; a issue carrega a barra do Gantt, não o piso do leque', async () => {
   const b = await board()
   const alpha = effortOf(b, 'alpha')
 
-  // O esforço publica a criação dele — o `birthtime` do diretório, que é fato exato.
+  // O esforço publica a criação dele — o `birthtime` do diretório, que é fato exato —, e o
+  // fim, que é `null` enquanto ele vive (o cerco estica até "hoje", do navegador).
   assert.match(alpha.created, /^\d{4}-\d{2}-\d{2}$/, 'o created do esforço é um dia, não um instante')
   assert.equal(alpha.created, dayAgo(0), 'o diretório nasceu neste teste: o dia é hoje')
+  assert.equal(alpha.ended, null, 'esforço ativo não terminou')
 
   for (const i of alpha.issues) {
-    // Toda issue herda o mesmo piso — é a limitação assumida da fatia 1 (o leque): o servidor
-    // não observou o nascimento de nenhuma, então o mais honesto que existe é "não antes do
-    // esforço". O catálogo (ticket 05) é quem afia isso, issue a issue.
-    assert.equal(i.created.day, alpha.created)
-    assert.equal(i.created.floor, true, 'um piso tem que viajar dizendo que é piso')
+    // O piso por-issue (o leque da fatia 1) foi arrancado: a issue não carrega mais `created`.
+    // Ela carrega a **barra** do catálogo — medida ou cercada, conforme o servidor a tenha
+    // visto transicionar. (Que uma transição vira barra medida, e o `seen` só vira cercada,
+    // é o `history-server.test.js` que prova, contra um catálogo isolado.)
+    assert.equal(i.created, undefined, 'o piso por-issue foi arrancado com o leque')
+    assert.equal(typeof i.bar?.measured, 'boolean', 'a issue carrega a barra do catálogo')
   }
 })
 
-test('o `created` sobrevive ao arquivamento — o `mv` preserva o inode do diretório', async () => {
+test('o `created` sobrevive ao arquivamento, e o arquivado ganha `ended` — o `mv` preserva o inode', async () => {
   await put('efemero/issues/01-a.md', issue('01 — A', 'resolved'))
   const nascido = effortOf(await board(), 'efemero').created
   assert.equal(nascido, dayAgo(0))
 
   // Arquivar é `mv .scratch/<slug> .scratch/archive/<slug>` — `rename` preserva o inode, e
-  // com ele o `birthtime`. É o que dá início e fim reais a um esforço terminado.
+  // com ele o `birthtime`; o `ctime` marca o `mv` e vira o **fim** do esforço.
   await mkdir(join(root, 'archive'), { recursive: true })
   await rename(join(root, 'efemero'), join(root, 'archive/efemero'))
 
   const b = await board()
   const arquivado = b.archived.find((e) => e.slug === 'efemero')
   assert.equal(arquivado.created, nascido, 'arquivar não pode apagar a data de criação')
-  assert.equal(arquivado.issues[0].created.day, nascido)
+  assert.match(arquivado.ended, /^\d{4}-\d{2}-\d{2}$/, 'o esforço arquivado ganha um fim de disco (o ctime do mv)')
 })

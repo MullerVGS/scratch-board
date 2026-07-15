@@ -13,6 +13,16 @@
   position: relative;
 }
 
+/* O cerco do esforço: a faixa tênue do `created` ao `ended`/hoje, por trás de tudo. É a
+   barra-pai de disco — o intervalo em que as hachuradas se inscrevem. */
+.gcerco {
+  position: absolute;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border-left: 1px solid var(--line-soft);
+  border-right: 1px solid var(--line-soft);
+  pointer-events: none;
+}
+
 /* ---------- o eixo de datas ---------- */
 
 .gtick {
@@ -85,8 +95,9 @@
   position: absolute;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 22%, var(--panel-2));
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));
   cursor: pointer;
+  overflow: hidden; /* as faixas por coluna se recortam no `border-radius` da barra */
   transition: border-color 0.12s;
 }
 
@@ -95,25 +106,53 @@
   z-index: 2;
 }
 
-/* Fechada é história: a barra terminou onde terminou, e o verde diz "cumprida". */
-.gbar.is-closed {
-  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
-  background: color-mix(in srgb, var(--green) 16%, var(--bg-soft));
-}
-
 .gbar.is-blocked {
   border-color: color-mix(in srgb, var(--red) 55%, var(--line));
 }
 
-/* A borda esquerda ABERTA é o desenho do piso: "começou em algum momento antes daqui".
-   O fade substitui a borda — uma barra de início incerto não pode ter uma parede de
-   início. O `min()` protege a lasca: numa barra de meio dia, o fade não a apaga. */
-.gbar.is-floor {
-  border-left: none;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 min(18px, 70%));
-  mask-image: linear-gradient(90deg, transparent, #000 min(18px, 70%));
+/* ---------- sólido é fato: as faixas por coluna (o "tempo em coluna") ---------- */
+
+/* Cada faixa é uma coluna que o ticket atravessou, com a largura do tempo que ele passou nela.
+   Elas ladrilham a barra sólida da esquerda à direita; a barra em si só emoldura. */
+.gseg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.gseg.is-triagem {
+  background: color-mix(in srgb, var(--faint) 28%, transparent);
+}
+.gseg.is-pronto {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.gseg.is-curso {
+  background: color-mix(in srgb, var(--amber) 34%, transparent);
+}
+.gseg.is-fechado {
+  background: color-mix(in srgb, var(--green) 32%, transparent);
+}
+
+/* Fechada é história cumprida: a moldura verde diz isso mesmo com as faixas dentro. */
+.gbar.is-closed {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
+}
+
+/* ---------- hachurado é cerco: o intervalo que CONTÉM o fato, nunca o fato ---------- */
+
+/* O servidor nunca viu este ticket transicionar. A hachura diagonal é o desenho da incerteza —
+   "aconteceu em algum momento aqui dentro" —, e ela não pode ser confundida com o sólido. Sem
+   faixas: o board não fabrica uma coluna que ninguém observou. */
+.gbar.is-hatched {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--faint) 55%, var(--line));
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--faint) 20%, transparent),
+    color-mix(in srgb, var(--faint) 20%, transparent) 4px,
+    transparent 4px,
+    transparent 9px
+  );
 }
 
 /* ---------- as setas ---------- */
