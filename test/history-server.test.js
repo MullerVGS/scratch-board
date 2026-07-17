@@ -8,7 +8,7 @@
  * esforço (um `mv` que troca o caminho de todas as issues de uma vez) também não.
  *
  * **Por que este arquivo existe, em vez de o bloco morar no `history.test.js`.** O `HISTORY`
- * do `history.js` é resolvido **no import**, como o `SCRATCHES` do `paths.js` — então plantar
+ * do `history.js` é resolvido **no import**, como o `REPOS` do `paths.js` — então plantar
  * `HISTORY_DIR` só vale antes da primeira carga do módulo no processo. O `history.test.js`
  * importa o `createHistory` estaticamente (os testes de unidade de lá passam o `dir` na mão e
  * não se importam), e essa carga congelaria o `HISTORY` no default antes de qualquer teste
@@ -20,7 +20,7 @@
  * **E por que o ambiente é plantado uma vez só, e não por teste.** Pela mesma razão, um andar
  * abaixo: o `?boot=` do `import()` renova o `server.js`, mas o `import` que *ele* faz de
  * `./history.js` e `./paths.js` é um especificador sem query — ele bate no módulo já cacheado,
- * e o `HISTORY`/`SCRATCHES` da primeira carga vale para o processo inteiro. Trocar o
+ * e o `HISTORY`/`REPOS` da primeira carga vale para o processo inteiro. Trocar o
  * `HISTORY_DIR` entre os testes não trocaria nada; ele ficaria onde o primeiro `boot()` o
  * fixou. É por isso que o `server.test.js` também planta o ambiente num `before` e compartilha
  * um root com o arquivo todo.
@@ -46,7 +46,7 @@ before(async () => {
   histDir = await mkdtemp(join(tmpdir(), 'sb-hist-'))
 
   // Antes de qualquer `import()`: os três roots são resolvidos no import dos módulos.
-  process.env.SCRATCHES_DIR = mounts
+  process.env.REPOS_DIR = mounts
   process.env.PADS_DIR = join(mounts, '__pads__')
   process.env.HISTORY_DIR = histDir
 })
@@ -59,7 +59,7 @@ after(async () => {
 /** Uma origem só deste teste. O log é comum; a chave de cada evento é que separa. */
 async function bootstrap() {
   const ns = `origem${++origens}`
-  const root = join(mounts, ns)
+  const root = join(mounts, ns, '.scratch')
   await mkdir(root, { recursive: true })
   return { ns, root }
 }

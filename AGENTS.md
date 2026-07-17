@@ -4,34 +4,50 @@ Board de leitura dos `.scratch/` do workspace. Serve para enxergar os esforços 
 
 ## O princípio
 
-**Os `.md` são a fonte da verdade. O board é uma projeção — e só isso.**
+**Os `.md` são a fonte da verdade sobre o trabalho. O board os projeta e nunca os edita.**
 
-O board **não escreve**. Quem muda status é você ou a skill que resolve o ticket, no arquivo; o board **é avisado** e mostra o resultado — sem refresh, sem F5, sem esperar relógio nenhum. Não há banco e não há índice.
+Quem muda `Status:`, título, bloqueio ou resposta é você ou a skill, no arquivo; o board **é avisado** e mostra o resultado — sem refresh, sem F5, sem esperar relógio nenhum. Nenhuma rota escreve num `.md`, e todos os `.scratch/` sobem **read-only**: essa garantia continua sendo do mount, não da boa intenção.
 
-Existe **cache**, e ele não fere o princípio — mas a distinção é fina o bastante para merecer estar escrita, porque é ela que alguém vai atropelar. O cache do `src/cache.js` é **derivado**: um watcher relê o disco e o reconstrói inteiro a partir dos `.md`. Ele não é um estado paralelo que alguém edita, ninguém escreve nele pela lateral, e **nenhuma rota o serve no lugar do disco** — nem o `/api/board`, nem o snapshot de conexão do SSE. Ele existe para **suprimir** o que não mudou, nunca para *responder*. Um board de memória servido sem reler é exatamente o silêncio mentiroso que o push corre o risco de virar (ver **A rede de segurança**).
+O servidor tem, porém, **um estado próprio**: o catálogo de história (`src/history.js`), um log append-only num volume separado. Ele observa as transições de `Status:` da projeção e recebe confirmações pela `/api/confirm`; não é uma segunda cópia dos tickets e nunca abre o mount para escrita. Esta é a primeira rota de escrita do projeto, e a distinção é a garantia: **o servidor escreve a história que lhe pertence, nunca o `.scratch/`.**
 
-Houve um kanban com drag-and-drop que gravava `Status:` ao soltar o card. Saiu. Ele nasceu de uma palavra solta na especificação ("kanban"), não de uma necessidade — e ser a única superfície de escrita punha o board em contradição com a própria fronteira que ele defende (ver **Fronteira**, no fim). O `.scratch/` sobe montado **read-only**: a garantia agora é do mount, não da boa intenção.
+Existe também **cache**, e ele não fere o princípio — mas a distinção é fina o bastante para merecer estar escrita, porque é ela que alguém vai atropelar. O cache do `src/cache.js` é **derivado**: um watcher relê o disco e o reconstrói inteiro a partir dos `.md`. Ele não é o catálogo, ninguém escreve nele pela lateral, e **nenhuma rota o serve no lugar do disco** — nem o `/api/board`, nem o snapshot de conexão do SSE. Ele existe para **suprimir** o que não mudou, nunca para *responder*. Um board de memória servido sem reler é exatamente o silêncio mentiroso que o push corre o risco de virar (ver **A rede de segurança**).
 
-Se for adicionar recurso, mantenha a propriedade: **nada de estado que não esteja nos `.md`, e nada de escrita.** A única exceção é a largura da gaveta (ver **A gaveta**), que é preferência de quem olha, não conteúdo.
+Houve um kanban com drag-and-drop que gravava `Status:` ao soltar o card. Saiu. Ele nasceu de uma palavra solta na especificação ("kanban"), não de uma necessidade — e ser a única superfície que editava o trabalho punha o board em contradição com a própria fronteira que ele defende (ver **Fronteira**, no fim). O arrasto que existe hoje é outro: ele **confirma uma janela de tempo no catálogo**, sem tocar no ticket.
+
+Se for adicionar recurso, mantenha a propriedade: **conteúdo e estado do trabalho ficam nos `.md`; observações e confirmações temporais ficam no catálogo do servidor; nenhuma escrita cruza essa fronteira.** A largura da gaveta (ver **A gaveta**) continua sendo só preferência de quem olha, não conteúdo.
 
 ## As origens
 
 O board não tem *um* `.scratch/`. Ele tem **os que estiverem montados**, cada um uma **origem** (namespace) completa: esforços, mapas, issues, archive, kanban, grafo, gaveta, comandos e push. `projetos` é a de casa; `vend-server` é a segunda; qualquer subpasta nova é a próxima.
 
-**O compose é a configuração, e é a única.** Cada filho direto de `/workspace/scratches/` é uma origem, e **o nome da pasta é o nome dela**:
+**O compose é a configuração, e é a única.** Cada filho direto de `/workspace/repos/` é **um repo**, a origem é o `.scratch/` **de dentro dele**, e **o nome da pasta é o nome dela**:
 
 ```yaml
-- ../.scratch:/workspace/scratches/projetos:ro
-- ../vend-server/.scratch:/workspace/scratches/vend-server:ro
+- ../:/workspace/repos/projetos:ro
+- ../vend-server:/workspace/repos/vend-server:ro
 ```
 
 Não há lista em env, não há arquivo de config, não há registro no código. Uma segunda lista seria uma segunda fonte da verdade, e as duas divergiriam no dia em que alguém somasse o mount e esquecesse a lista — o board subiria mostrando um repositório a menos, **sem erro nenhum**. A descoberta é um `readdir` no `start()`: mount novo, aba nova, container recriado.
 
-As decisões que caem daí, e o que cada uma protege:
+### Monte o repo, nunca o `.scratch/`
+
+Esta é a linha que alguém vai "simplificar" de volta, porque montar o `.scratch/` direto parece mais honesto — é ele que o board lê. Era assim, e **matava o board em silêncio**.
+
+Um bind mount se prende ao **inode**, não ao caminho. E o `.scratch/` é **versionado**: um `git checkout` para uma branch que não o contém faz o git **apagar o diretório inteiro** — não é hipótese, é a rotina (no `vend-server`, `main` não tem `.scratch/`; no `pos`, nenhuma branch antiga tem). O checkout de volta o **recria, com outro inode**. Montado o `.scratch/`, o container ficava preso ao inode que o git tinha acabado de apagar — que o git esvaziou — e via a origem **vazia para sempre**: um repositório cheio de esforços aparecendo como um repositório sem nenhum, que é exatamente a mentira mais cara que este board pode contar. **Nem a varredura de 90s nem o botão de reler curavam**, porque os dois releem pelo mesmo mount morto; só `docker compose up -d --force-recreate`.
+
+O diretório do **repo**, esse, o git nunca apaga. Montado ele, o `.scratch/` é resolvido **por caminho** a cada `readdir`, e o inode novo é achado sozinho. Medido no container, com checkout de verdade: a origem some quando a branch não tem `.scratch/`, e **volta inteira** quando ele volta — com o inode trocado (34604854 → 34831673).
+
+Três consequências que caem daí:
+
+- **Montar o repo não é servir o repo.** O `ns.root` continua sendo o `.scratch/` de dentro, e é ele que o `safePath()` prende e o watcher vigia. Nenhum byte fora do `.scratch/` fica alcançável pela API — monta-se mais para que o board continue achando o mesmo.
+- **A origem existe porque o repo está montado, não porque o `.scratch/` está lá agora.** Um repo cuja branch atual não tem `.scratch/` é uma origem de board **vazio**, e vazio é a verdade — a branch não tem esforço nenhum. Condicionar a descoberta à existência do diretório reintroduziria o bug por outra porta: ela roda **uma vez, no `start()`**, então a aba sumiria e só voltaria no próximo `--force-recreate`.
+- **O diretório comum se chama `repos` porque é o que ele contém.** Chamava-se `scratches`, e o nome ficou mentiroso no dia em que o conteúdo mudou. Nome mentiroso aqui custa caro: é ele que faz o próximo leitor remontar o `.scratch/` direto e ressuscitar tudo isto.
+
+As demais decisões que caem daí, e o que cada uma protege:
 
 - **A de casa vem primeira; o resto, em ordem alfabética.** `HOME_NS` (default `projetos`) é quem decide qual é a de casa, e ela é a entrada inicial: um `#/` nu vai para ela.
 - **O nome da origem decide o `ref`.** Os comandos partem de `/root/projetos`, então a de casa produz `.scratch/...` — nu, porque o agente já está lá — e qualquer outra produz `<nome>/.scratch/...`. **Nomeie a pasta do mount como o caminho do repo a partir de `/root/projetos`**, ou o comando copiado apontará para um lugar que não existe. O caminho do container nunca aparece na tela.
-- **O nome é um segmento só, e um repo aninhado ainda não tem como entrar.** `admin-server/administrative` está a dois níveis de `/root/projetos`, e um mount em `/workspace/scratches/admin-server/administrative` **não** cria uma origem chamada `admin-server/administrative`: ele cria um filho direto chamado `admin-server`, e o board o lê como uma origem cujo único "esforço" se chama `administrative`. Não estoura nada — **desenha um board plausível e errado**, que é o pior jeito de falhar. Enquanto isso não for resolvido (o `ref` teria que sair de outro lugar que não o nome da pasta), **monte só repos de primeiro nível**.
+- **O nome é um segmento só, e um repo aninhado ainda não tem como entrar.** `admin-server/administrative` está a dois níveis de `/root/projetos`, e um mount em `/workspace/repos/admin-server/administrative` **não** cria uma origem chamada `admin-server/administrative`: ele cria um filho direto chamado `admin-server`, e o board procura o `.scratch/` dele — que não existe —, servindo uma origem vazia com nome errado. Não estoura nada — **desenha um board plausível e errado**, que é o pior jeito de falhar. Enquanto isso não for resolvido (o `ref` teria que sair de outro lugar que não o nome da pasta), **monte só repos de primeiro nível**.
 - **Toda rota é qualificada, e não há rota legada.** `#/<ns>`, `#/<ns>/<slug>`, `#/<ns>/<slug>/grafo`, `#/<ns>/<slug>/gantt`, `#/<ns>/archive/<slug>`. O slug sozinho não endereça nada: **dois esforços com o mesmo slug em origens diferentes existem**, e um hash sem origem escolheria um dos dois no escuro. Um `#/<slug>` velho cai na origem de casa em vez de meio funcionar.
 - **Watcher, hash do board, digest dos arquivos e varredura são por origem.** O `cache.js` é uma **fábrica** (`createCache(ns)`) por isso: com o estado no módulo, duas origens dividiriam o mesmo hash, e a segunda a escrever teria a sua mudança **suprimida** pela primeira — o board de um repositório simplesmente parando de chegar, que é indistinguível de "nada mudou". Não há supressão cruzada, e não é uma regra a lembrar: é a forma da função.
 - **Uma conexão SSE, N origens.** Cada evento carrega `ns` e **só o board daquela origem** — mandar as N em todo evento seria pagar o board do `vend-server` toda vez que alguém escreve no `projetos`. O cliente guarda o board novo sempre; **redesenha só se a origem for a que está na tela**. Uma origem inativa que andou atualiza a contagem da própria aba e nada mais se mexe (medido: **0 re-render** da origem ativa, e a aba do `projetos` subindo de 58 para 59 enquanto o `vend-server` estava aberto). Trocar de aba não faz request: o board já está na mão.
@@ -43,7 +59,7 @@ As decisões que caem daí, e o que cada uma protege:
 
 ```
 docker compose up -d      # http://localhost:7777 (só loopback)
-node --test test/         # 157 testes, zero dependências
+node --test test/         # 200 testes, zero dependências
 ```
 
 `src/`, `shared/` e `public/` são montados como volume e não há build step — editar e `docker compose restart` basta. **Mexer nas origens é a exceção**: elas são descobertas no `start()`, então um mount novo pede `docker compose up -d --force-recreate`, não um restart.
@@ -135,8 +151,22 @@ Na prática:
 | --- | --- |
 | atômica (`tmp` + `rename` — agentes, editores) | **~150ms** |
 | direta num arquivo já renomeado antes (`echo >>`) | **até 90s** |
+| a primeira depois de um `git checkout` que recriou o `.scratch/` | **até 90s** (ver abaixo) |
 
 Ninguém que escreve no `.scratch/` escreve assim, então o buraco é estreito e **tem rede embaixo**. Consertá-lo de verdade é reescrever o `watch.js` para watch por diretório em vez do recursivo do Node. Isso é uma limitação conhecida, não uma promessa quebrada — e **o `AGENTS.md` não promete o que o servidor não entrega**.
+
+### O root que troca de inode, e o `rearm()`
+
+O mesmo defeito tem uma segunda cara, e essa a topologia do compose **não** resolve. Montar o repo cura a **leitura** (ela resolve o caminho a cada `readdir`); o **watcher** continua preso ao inode em que o `fs.watch` foi aberto. Quando o `git checkout` apaga e recria o `.scratch/`, ele fica olhando um inode morto — e **não emite `error`** (o kernel manda `rename` e cala), então o `reopen()` do `watch.js` nunca dispara. Ele não morre: **cala, parecendo vivo**. Medido no container depois de um checkout real: board correto, push mudo **para sempre**.
+
+Por isso o `sync()` chama `rearm()` (`server.js`): um `stat` no root, e se o inode não é aquele em que o watch foi aberto, o watch é reaberto. Ele mora no `sync()` pela mesma razão que o catálogo observa lá — é o único ponto por onde toda leitura de disco passa (o gatilho, a varredura, o `/api/board`) —, e **não tem relógio próprio**: um `setInterval` só para statar roots seria o polling voltando pela porta dos fundos. Ocioso continua custando zero.
+
+Duas coisas para não perder:
+
+- **É heurística, e a rede está embaixo.** O sinal é a troca do número do inode, e ele **pode mentir**: o ext4 reusa o número quando a recriação é imediata (medido — mesmo `ino` dos dois lados de um `rm`+`mkdir` colado). No `git checkout` de verdade ele trocou, que é o caso que motivou isto; quando não trocar, o rearme não dispara e o board volta a depender da varredura. Degradado, **nunca mentindo**.
+- **Ele não ressuscita o que foi morto de propósito.** O `stopWatch()` não move o inode, então `watching` continua batendo e nada acontece — é o que mantém o `sweep.test.js` honesto, e um rearme que "reabrisse por via das dúvidas" o tornaria decoração.
+
+Na prática: depois de um checkout, o primeiro `sync()` (a varredura, ≤90s) rearma; nessa janela a própria varredura mantém o board correto. O conserto sem heurística é o mesmo de sempre — watch por diretório.
 
 ## A rede de segurança
 
@@ -236,7 +266,7 @@ Isso vale no servidor e no renderer, e **o servidor já errou aqui** — é o bu
 
 ## Dois vocabulários de caminho
 
-Todo item da API carrega dois nomes para o mesmo arquivo: `path`, o caminho **dentro do container** (`/workspace/scratches/<ns>/...`), por onde o board lê; e `ref`, o caminho **como o workspace o vê** (`.scratch/...`, `vend-server/.scratch/...`), que é o único que faz sentido colar num agente.
+Todo item da API carrega dois nomes para o mesmo arquivo: `path`, o caminho **dentro do container** (`/workspace/repos/<ns>/.scratch/...`), por onde o board lê; e `ref`, o caminho **como o workspace o vê** (`.scratch/...`, `vend-server/.scratch/...`), que é o único que faz sentido colar num agente.
 
 O `ref` é derivado no servidor (`refIn`, em `src/paths.js`), não no cliente: quem sabe qual root montou o quê é o processo que resolveu os roots — e com N origens isso deixou de ser uma preferência de arquitetura e virou a única forma correta. `HOME_NS` diz qual origem é a de casa (a única de `ref` nu); `PADS_REF` faz o mesmo pelos scratchpads.
 
@@ -371,23 +401,26 @@ O grafo não inventa nada: as referências do `Blocked by:` são locais ao esfor
 
 ## Carimbo de filesystem não é eixo de tempo
 
-Isto está escrito aqui porque **a ideia é atraente e o dado *parece* existir** — sem este parágrafo, alguém vai tentar de novo.
+Isto está escrito aqui porque **a ideia é atraente e o dado *parece* existir** — sem esta fronteira, alguém vai tentar de novo. O filesystem dá uma ordem de atividade e um cerco para o esforço; ele não diz quando o trabalho andou.
 
-O `birthtime` existe no ext4 e parece a data de criação do ticket. **Ele não é.** O `Write` dos agentes reescreve o arquivo inteiro, o que **cria um inode novo** — e inode novo tem `birthtime` novo. Medido na frota: um ticket `resolved` (escrito, trabalhado e fechado ao longo de dias) tem `birthtime == mtime`, e a **mediana de `Δ birth→mtime` é 0s** em quase todos os esforços — não porque os arquivos nunca mudaram, mas porque a mudança **apagou o rastro de que eles existiam antes**.
+O `birthtime` existe no ext4 e parece a data de criação do ticket. **Ele não é.** O `Write` dos agentes reescreve o arquivo inteiro, o que **cria um inode novo** — e inode novo tem `birthtime` novo. Medido na frota: `birthtime == mtime` em 121/146 arquivos e `ctime == mtime` em 146/146 — não porque os arquivos nunca mudaram, mas porque a mudança **apagou o rastro de que eles existiam antes**. Um Gantt de issues construído sobre isso nasce com barras de duração zero.
 
-Um Gantt construído sobre isso sairia com **barras de duração zero**.
+O `mtime` do arquivo também tem um papel, mas um só: responder **"quem foi mexido por último?"**. É ele que ordena esforços e tickets por atividade. Ele não responde quando uma issue foi resolvida, quando entrou no status atual ou quanto durou — um `Blocked by:` corrigido, uma resposta complementada ou um typo movem o `mtime` sem o trabalho andar. O caso do Taiga demonstrou o defeito: um toque tangencial fez barras fechadas saltarem para hoje e zerou o contador de encalhe.
 
-### Mas o diretório sobrevive — e essa frase acima é generalizada demais
+### O diretório dá o cerco, não o eixo
 
-**Cuidado com o título desta seção: ele está certo sobre *arquivo* e errado sobre *diretório*.** A generalização confiante quase matou uma solução inteira, e por isso a correção vem escrita junto.
+**"Carimbo de filesystem não é eixo de tempo" está certo sobre arquivo, mas não quer dizer que todo carimbo seja lixo.** Ninguém recria o diretório de um esforço: o `mkdir` acontece uma vez, e o `Write` atômico de um `.md` lá dentro não toca seu inode.
 
-**Ninguém recria um diretório.** O `mkdir` acontece uma vez, e o `Write` atômico de um `.md` lá dentro não toca o inode do diretório. Então:
+- O `birthtime` do diretório é a criação real do esforço e **sobrevive ao `mv` do arquivamento**, porque `rename` preserva o inode.
+- No fluxo de arquivamento, o `ctime` marca o `mv`. Nos três esforços medidos, os `birthtime`s de 10/07, 10/07 e 12/07 sobreviveram, enquanto o `ctime` marcou o arquivamento em 12/07.
 
-- **O `birthtime` do diretório de um esforço é a data de criação dele — de verdade.** E ele **sobrevive ao `mv` do arquivamento**, porque `rename` preserva inode. Medido nos três esforços já arquivados: `birthtime` de 10/07, 10/07 e 12/07, com o `ctime` marcando o `mv` (12/07). **Isso é início e fim reais de um esforço, no disco, hoje.**
-- **O `mtime` de um ticket `resolved` é, na prática, a resolução dele** — a última escrita num ticket fechado *foi* a que o fechou. Medido: os 14 tickets do `scratch-board-push-refactor`, ordenados por `mtime`, saem em `01 → 02 → 08 → 03 → 04 → 05 → 06 → 07 → 11 → 10 → 12 → 09 → 13 → 14` — **exatamente** a ordem de resolução que o mapa registra.
-- **O `mtime` de um ticket parado é quando ele entrou no estado atual**, porque ticket encalhado é, por definição, ticket que ninguém tocou.
+Esses carimbos sustentam a barra-pai e **cercam** o passado das issues antigas: o trabalho aconteceu em algum ponto dentro do esforço. Não recuperam a criação, as transições nem a resolução de cada ticket. Esse passado não tem backfill automático; quando importar, entra como confirmação humana no catálogo e se desenha numa camada própria.
 
-Ou seja: **há backfill, e ele é real.** O que *não* se recupera é o `created` **por ticket** — para isso, o diretório do esforço dá um **piso** honesto (o ticket não pode ser mais velho que o esforço).
+### O eixo estava no cabeçalho
+
+Toda afirmação sobre **quando o trabalho andou** vem da transição da linha `Status:`. O catálogo observa a projeção já parseada, persiste cada mudança e fornece ao card e ao Gantt um carimbo que salvamentos tangenciais não movem.
+
+Essa imobilidade inverte a regra antiga do push. O `mtime` era volátil e precisou ser quantizado por dia para não mover o hash a cada escrita; um carimbo de transição permanece byte-idêntico e atravessa o fio com **precisão total** sem criar push fantasma. **A quantização por dia morreu**: o Gantt preserva a duração real até o minuto, e o relativo (`"há N"`) continua sendo calculado apenas no navegador.
 
 ## O Gantt de um esforço
 
@@ -504,7 +537,7 @@ Isto foi uma **escolha**, não um esquecimento. As duas saídas custavam mais do
 
 ## Os testes
 
-`node --test test/` — **157 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
+`node --test test/` — **200 testes**, e o projeto não tinha nenhum. `node:test` e `node:assert` são builtin: **a zero-dependência sobreviveu**. Não há `jsdom` e não deve haver — as costuras caem onde o código já é puro, ou onde ele fala HTTP.
 
 | Costura | O que trava |
 | --- | --- |
@@ -516,6 +549,7 @@ Isto foi uma **escolha**, não um esquecimento. As duas saídas custavam mais do
 | `test/server.test.js` | **A costura mais alta.** Servidor de verdade em porta efêmera contra um `.scratch/` temporário, stream SSE lido com o `fetch` nativo, **arquivos escritos de verdade no disco**: o push, o debounce, a supressão, o esforço novo que aparece sem restart, o caminho fora do root recusado, os dois eventos (`message` × `files`), e a **segunda escrita atômica** do mesmo arquivo — o teste que o watcher derrubaria, e o que impede alguém de "simplificar" o digest de volta para a lista de caminhos. E a **ordem por atividade**: o esforço quente que abre a tela, a coluna do kanban ordenada, o ticket que **não era o primeiro** subindo ao topo num `message`, e os salvamentos seguintes — com ele **já em primeiro** — voltando a ser `files`. E o **tempo na coluna** (`held`): o instante imóvel que o ticket carrega (nenhuma string relativa viaja), o piso que vira fato ao transicionar, e o corpo reescrito sem mudar o `Status:` que **não move o `held`** — o caso do Taiga. O tempo se fabrica com `utimes()`; não há relógio a mockar. |
 | `test/watch.test.js` | O reopen depois do `error`, e um root que ainda não existe. |
 | `test/sweep.test.js` | A varredura de segurança. **Arquivo separado** porque ela precisa de um relógio curto (`sweep: 300`), e um servidor que empurra sozinho a cada 300ms envenenaria as asserções de silêncio do `server.test.js`. (Já foi separado por outro motivo — o hash de módulo do `cache.js` —, e esse motivo acabou.) É aqui também que vive o guarda do eixo de tempo: um board com um ticket **encalhado** (o `held` semeado na subida, um piso), atravessado por várias varreduras, continua **mudo** — é este teste que um `"há N"` calculado no servidor derrubaria. |
+| `test/checkout.test.js` | **O contrato do layout**, que é o que sobrou de testável do caso `git checkout`: a origem é o `.scratch/` **dentro** do repo montado, um `.scratch/` que a branch não tem é board **vazio e não erro**, e o que o checkout recria é lido (o root resolvido por caminho). O que ele **não** afirma está escrito nele: o bug era do bind mount, e sem um mount por baixo o teste passaria idêntico com o compose errado — a correção foi medida com checkout de verdade contra o container. A cegueira do watcher também não reproduz aqui (acontece no Node 22 do container, não no do host), e um teste que não fica vermelho não trava nada. |
 | `test/namespaces.test.js` | O que **só existe com mais de uma origem**: a descoberta e a ordem, o `ref` nu da de casa contra o qualificado das outras, **dois esforços com o mesmo slug** que não se confundem, o push que carrega o `ns` e **só o board da sua origem**, a supressão que **não atravessa** (escrever o mesmo byte numa não cega a outra), a origem vazia contra a **quebrada**, o erro que passa pelo hash em vez de gritar a cada varredura, e o snapshot de conexão trazendo uma origem por frame. |
 | `test/drawer.test.js` | O que a gaveta **assume sobre o mundo**: que o `changed` fala o mesmo vocabulário de caminho que o board, que a string do 404 é a que ela procura, e que o esforço publica `ns` e `path` — os dois campos com que ela acha o board certo. |
 | `test/pads.test.js` | A **poda** dos scratchpads: o `node_modules` do topo e o **aninhado**, as contagens, os bytes e a **recência** que ele não pode sequestrar, o vizinho recursivo que sobrevive com o `ref` absoluto real, a sessão que só deixou dependência e por isso some, e o arquivo *chamado* `node_modules` que **é conteúdo** — o teste que separa a poda na travessia de um filtro por nome depois dela. |

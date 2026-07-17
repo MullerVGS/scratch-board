@@ -20,7 +20,7 @@
  * e um import de módulo falha **em silêncio**: o board simplesmente não monta. A rota só é
  * defensável por HTTP, e é por isso que ela é testada aqui.
  *
- * Os roots do board saem do ambiente (`SCRATCHES_DIR`, `PADS_DIR`) e o `paths.js` os resolve
+ * Os roots do board saem do ambiente (`REPOS_DIR`, `PADS_DIR`) e o `paths.js` os resolve
  * no import — daí o `import()` dinâmico depois de plantar o ambiente.
  *
  * Aqui há **uma** origem, `projetos`, e é de propósito: o que se afirma neste arquivo é o
@@ -153,11 +153,11 @@ const age = (rel, days) => {
 
 before(async () => {
   mounts = await mkdtemp(join(tmpdir(), 'board-mounts-'))
-  root = join(mounts, 'projetos')
+  root = join(mounts, 'projetos', '.scratch')
   await mkdir(root, { recursive: true })
   pads = await mkdtemp(join(tmpdir(), 'board-pads-'))
   hist = await mkdtemp(join(tmpdir(), 'board-hist-'))
-  process.env.SCRATCHES_DIR = mounts
+  process.env.REPOS_DIR = mounts
   process.env.PADS_DIR = pads
   // O catálogo também sai do ambiente, e também é resolvido no import. Sem isto o
   // servidor do teste escreveria no `HISTORY` de produção (`/workspace/history`).

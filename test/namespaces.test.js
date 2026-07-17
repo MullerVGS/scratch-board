@@ -35,7 +35,7 @@ let base
 
 /** Escreve dentro de uma origem, criando o que faltar. É o equivalente a um mount novo. */
 async function put(ns, rel, body) {
-  const path = join(mounts, ns, rel)
+  const path = join(mounts, ns, '.scratch', rel)
   await mkdir(join(path, '..'), { recursive: true })
   await writeFile(path, body)
   return path
@@ -112,7 +112,7 @@ before(async () => {
   mounts = await mkdtemp(join(tmpdir(), 'board-ns-'))
   pads = await mkdtemp(join(tmpdir(), 'board-ns-pads-'))
   hist = await mkdtemp(join(tmpdir(), 'board-ns-hist-'))
-  process.env.SCRATCHES_DIR = mounts
+  process.env.REPOS_DIR = mounts
   process.env.PADS_DIR = pads
   // O catálogo também sai do ambiente, e também é resolvido no import. Sem isto o
   // servidor do teste escreveria no `HISTORY` de produção (`/workspace/history`).
@@ -130,12 +130,14 @@ before(async () => {
 
   // Uma origem montada e vazia: um repo que ainda não tem esforço nenhum. Vazio é um
   // estado, não uma falha.
-  await mkdir(join(mounts, 'vazia'), { recursive: true })
+  await mkdir(join(mounts, 'vazia', '.scratch'), { recursive: true })
 
   // E uma que **não dá para ler**: um diretório onde o board espera um `.md`. O `readFile`
   // estoura `EISDIR`, que é uma falha de leitura de verdade — não um `chmod` que o root
   // ignoraria. É o que prova que a falha fica contida na origem que a sofreu.
-  await mkdir(join(mounts, 'quebrada', 'ruim', 'issues', '01-nao-e-arquivo.md'), { recursive: true })
+  await mkdir(join(mounts, 'quebrada', '.scratch', 'ruim', 'issues', '01-nao-e-arquivo.md'), {
+    recursive: true,
+  })
 
   const mod = await import('../src/server.js')
   server = await mod.start(0)
@@ -251,7 +253,7 @@ test('a supressão não atravessa origens: cada uma tem o seu hash e o seu diges
 
 test('a edição de corpo numa origem emite o `files` dela — a gaveta viva vale em todas', async () => {
   const header = 'Status: resolved\nType: task\n\n# 01 — Um, mas do vend\n\n'
-  const alvo = join(mounts, 'vend-server', 'comum/issues/01-um.md')
+  const alvo = join(mounts, 'vend-server', '.scratch', 'comum/issues/01-um.md')
 
   const stream = await openStream()
   try {

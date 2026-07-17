@@ -18,11 +18,13 @@ Esse último ponto é o encaixe com o [mattpocock/skills](https://github.com/mat
 O board não tem *um* `.scratch/`: ele tem os que estiverem montados sob um diretório comum, e **o compose é a configuração inteira**.
 
 ```yaml
-- ../.scratch:/workspace/scratches/projetos:ro
-- ../vend-server/.scratch:/workspace/scratches/vend-server:ro
+- ../:/workspace/repos/projetos:ro
+- ../vend-server:/workspace/repos/vend-server:ro
 ```
 
-Cada filho direto é uma origem, e o nome da pasta é o nome dela. Um mount novo vira uma aba nova no próximo start — sem env, sem arquivo de config, sem uma segunda lista para divergir da primeira.
+Cada filho direto é um repositório, a origem é o `.scratch/` dentro dele, e o nome da pasta é o nome dela. Um mount novo vira uma aba nova no próximo start — sem env, sem arquivo de config, sem uma segunda lista para divergir da primeira.
+
+**O que se monta é o repo, e não o `.scratch/`** — a diferença importa. O `.scratch/` é versionado, e um `git checkout` para uma branch que não o tem apaga o diretório; a volta o recria com outro inode. Como um bind mount se prende ao inode, montá-lo direto deixava o container preso no diretório morto: a origem aparecia vazia **para sempre**, e nem a varredura nem o botão de reler curavam. O diretório do repo o git nunca apaga, e o `.scratch/` de dentro é reencontrado por caminho a cada leitura.
 
 O nome também decide o caminho que você copia. Os comandos partem de `/root/projetos`, então a origem de casa produz `.scratch/...` e qualquer outra produz `<nome>/.scratch/...`; o caminho interno do container nunca aparece na tela.
 

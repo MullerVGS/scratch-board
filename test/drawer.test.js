@@ -90,11 +90,11 @@ const issue = (title, status) => `Status: ${status}\nType: task\n\n# ${title}\n\
 
 before(async () => {
   mounts = await mkdtemp(join(tmpdir(), 'board-drawer-'))
-  root = join(mounts, 'projetos')
+  root = join(mounts, 'projetos', '.scratch')
   await mkdir(root, { recursive: true })
   pads = await mkdtemp(join(tmpdir(), 'board-drawer-pads-'))
   hist = await mkdtemp(join(tmpdir(), 'board-drawer-hist-'))
-  process.env.SCRATCHES_DIR = mounts
+  process.env.REPOS_DIR = mounts
   process.env.PADS_DIR = pads
   // O catálogo também sai do ambiente, e também é resolvido no import. Sem isto o
   // servidor do teste escreveria no `HISTORY` de produção (`/workspace/history`).

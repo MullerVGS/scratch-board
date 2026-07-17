@@ -22,7 +22,7 @@ import { createServer } from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { resolve, extname, sep } from 'node:path'
 
-import { PADS, SCRATCHES, discover } from './paths.js'
+import { PADS, REPOS, discover } from './paths.js'
 import { listPads } from './pads.js'
 import { buildBoard } from './board.js'
 import { createCache } from './cache.js'
@@ -121,10 +121,47 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
   // `sync()`, depois que o board foi lido.
   const history = await createHistory()
 
-  /** Uma origem, e tudo que é dela: o board, a supressão, o digest, o watcher. */
+  /**
+   * Uma origem, e tudo que é dela: o board, a supressão, o digest, o watcher — e o **inode**
+   * em que esse watcher foi aberto, que é como o `rearm()` sabe que ele ficou para trás.
+   */
   const wires = new Map(
-    namespaces.map((ns) => [ns.name, { ns, cache: createCache(ns, history), unwatch: null }]),
+    namespaces.map((ns) => [
+      ns.name,
+      { ns, cache: createCache(ns, history), unwatch: null, watching: undefined },
+    ]),
   )
+
+  /**
+   * Reabre o watcher de uma origem quando o `.scratch/` **trocou de inode** por baixo dele.
+   *
+   * O `git checkout` de uma branch sem `.scratch/` apaga o diretório; a volta o recria, com
+   * outro inode. A **leitura** sobrevive a isso (resolve o caminho a cada `readdir`, e é para
+   * isso que o compose monta o repo). O **watcher**, não: o `fs.watch` se prende ao inode que
+   * abriu, e apagar o root **não emite `error`** — está verificado no `watch.js`, o kernel
+   * manda `rename` e cala. Ele não morre: **cala**, parecendo vivo. Medido no container
+   * (Node 22) depois de um checkout real: board correto, push mudo para sempre.
+   *
+   * **É heurística, e a rede está embaixo.** O sinal é a troca do número do inode, e ele pode
+   * mentir: o ext4 **reusa** o número quando a recriação é imediata (medido — mesmo `ino` dos
+   * dois lados de um `rm`+`mkdir` colado). No `git checkout` de verdade ele trocou
+   * (34604854 → 34831673), que é o caso que motivou isto; quando não trocar, o rearme não
+   * dispara e o board volta a depender da varredura de 90s — degradado, **nunca mentindo**.
+   * O conserto sem heurística é o watch por diretório que o `watch.js` já aponta.
+   *
+   * **Não ressuscita o que foi morto de propósito**: o `stopWatch()` não move o inode, então
+   * `watching` continua batendo e nada acontece — é o que mantém o `sweep.test.js` honesto.
+   */
+  const rearm = async (name) => {
+    const wire = wires.get(name)
+    const ino = await stat(wire.ns.root).then((s) => s.ino, () => null)
+    if (ino === wire.watching) return
+    wire.watching = ino
+    wire.unwatch?.()
+    wire.unwatch = watchTree(wire.ns.root, () => {
+      sync(name).catch(() => { /* o disco piscou; a varredura de segurança repesca */ })
+    })
+  }
 
   // Os roots que o board pode ler. É o `safePath()` de sempre, agora generalizado às
   // origens descobertas — **e é só isso**: nenhuma política nova de `realpath`, nenhum
@@ -235,6 +272,22 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
       await history.observe(name, [...board.efforts, ...board.archived], Date.now())
     } catch (err) {
       console.error(`catálogo: falha ao observar ${name}: ${err.message}`)
+    }
+
+    // E o watcher se reconcilia **aqui**, pela mesma razão que o catálogo observa aqui: este é
+    // o único ponto por onde toda leitura de disco passa — o gatilho do watcher, a varredura de
+    // 90s e o `/api/board`. Pendurá-lo no watcher o deixaria cego justamente quando o watcher
+    // cala, que é o buraco que ele existe para tapar.
+    //
+    // **Sem relógio próprio, de propósito.** A varredura já é a rede contra o silêncio e o botão
+    // de reler já é a válvula humana; os dois passam por aqui. Um `setInterval` só para statar
+    // roots seria polling voltando pela porta dos fundos, e num board parado custaria
+    // exatamente o que a supressão comprou. **Ocioso continua custando zero**: um `stat` por
+    // `sync()`, e `sync()` não roda por relógio.
+    try {
+      await rearm(name)
+    } catch (err) {
+      console.error(`watcher: falha ao rearmar ${name}: ${err.message}`)
     }
 
     if (moved) broadcast(frame(name, json, changed))
@@ -399,11 +452,13 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
   // reportar um nome depois que um `rename` troca o inode por baixo dele, e é assim que os
   // agentes escrevem (tmp + rename): da segunda edição em diante, o arquivo de verdade some
   // do relato do kernel. Ele basta para dizer *que* algo mexeu; quem diz *o quê* é o digest.
-  for (const [name, wire] of wires) {
-    wire.unwatch = watchTree(wire.ns.root, () => {
-      sync(name).catch(() => { /* o disco piscou; a varredura de segurança repesca */ })
-    })
-  }
+  //
+  // A montagem inicial é o **mesmo** `rearm()` que o `sync()` chama depois: na subida o
+  // `watching` está `undefined`, e nenhum inode é igual a isso, então o primeiro rearme sempre
+  // abre o watch. Um caminho só para abrir watcher — um `watchTree()` à parte aqui nasceria
+  // sem registrar o inode, e o primeiro `sync()` fecharia e reabriria o que a subida acabou
+  // de abrir.
+  await Promise.all([...wires.keys()].map((name) => rearm(name)))
 
   // A varredura não empurra só o board: como o `changed` sai do digest e não do watcher, ela
   // também sabe **quais** arquivos mudaram — então, com o watcher morto, a gaveta aberta se
@@ -446,5 +501,5 @@ const isMain = process.argv[1] && resolve(process.argv[1]) === import.meta.filen
 if (isMain) {
   const { port, namespaces } = await start()
   const origens = namespaces.map((ns) => ns.name).join(', ') || 'nenhuma — o compose não montou nada'
-  console.log(`scratch-board em http://localhost:${port}  (${SCRATCHES}: ${origens})`)
+  console.log(`scratch-board em http://localhost:${port}  (${REPOS}: ${origens})`)
 }

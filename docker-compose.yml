@@ -10,11 +10,25 @@ services:
     volumes:
       # ---------- as origens ----------
       #
-      # **Este bloco é a configuração inteira.** Cada mount sob `/workspace/scratches/` é
-      # uma origem completa (esforços, mapas, issues, archive, grafo, gaveta, push), e o
-      # **nome da pasta é o nome do namespace** — não há lista em env, nem arquivo de
-      # config, nem nada a manter em dois lugares. Somar um repositório é somar uma linha
-      # aqui e recriar o container; ele aparece como aba nova.
+      # **Este bloco é a configuração inteira.** Cada mount sob `/workspace/repos/` é um repo,
+      # a origem é o `.scratch/` **de dentro dele**, e o **nome da pasta é o nome do
+      # namespace** — não há lista em env, nem arquivo de config, nem nada a manter em dois
+      # lugares. Somar um repositório é somar uma linha aqui e recriar o container; ele
+      # aparece como aba nova.
+      #
+      # **Monte o REPO, nunca o `.scratch/`.** Esta linha é a correção de um bug que matava o
+      # board em silêncio, e ela é fácil de "arrumar" de volta. Um bind mount se prende ao
+      # **inode**, não ao caminho — e o `.scratch/` é versionado: `git checkout` de uma branch
+      # que não o tem o **apaga inteiro** (no `vend-server`, `main` não tem; no `pos`, nenhuma
+      # branch antiga tem), e o checkout de volta o **recria com outro inode**. Montado o
+      # `.scratch/` direto, o container ficava preso ao inode morto e via a origem **vazia
+      # para sempre** — um repo cheio de esforços aparecendo como um repo sem nenhum. Nem a
+      # varredura de 90s nem o botão de reler curavam (os dois releem pelo mesmo mount);
+      # só `--force-recreate`. O diretório do repo, esse, o git nunca apaga.
+      #
+      # Montar o repo **não serve o repo**: o `safePath()` prende as leituras ao `ns.root`, que
+      # é o `.scratch/` de dentro. Monta-se mais para que o board continue achando o mesmo —
+      # nenhum byte fora do `.scratch/` fica alcançável pela API.
       #
       # O nome também decide o `ref` que o humano copia: os comandos partem de
       # `/root/projetos`, então `projetos` produz `.scratch/...` e qualquer outra origem
@@ -22,9 +36,9 @@ services:
       #
       # Read-only, todas: o board é uma projeção — quem escreve nos .md são você e as
       # skills. O mount é a garantia, não só a intenção.
-      - ../.scratch:/workspace/scratches/projetos:ro
-      - ../pos/.scratch:/workspace/scratches/pos:ro
-      - ../vend-server/.scratch:/workspace/scratches/vend-server:ro
+      - ../:/workspace/repos/projetos:ro
+      - ../pos:/workspace/repos/pos:ro
+      - ../vend-server:/workspace/repos/vend-server:ro
 
       # Scratchpads de sessão dos agentes. **Não é uma origem**: é rascunho efêmero do
       # Claude, global, sem watcher e sem push. Read-only, como tudo aqui.

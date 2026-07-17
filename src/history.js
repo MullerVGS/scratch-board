@@ -30,7 +30,7 @@ import { join, resolve } from 'node:path'
  * board não corrompe os tickets é do mount, não da boa intenção. Aqui é o estado do
  * servidor, e é só dele.
  *
- * Resolvido no import, como o `SCRATCHES` do `paths.js`: o teste planta o ambiente antes.
+ * Resolvido no import, como o `REPOS` do `paths.js`: o teste planta o ambiente antes.
  */
 export const HISTORY = resolve(process.env.HISTORY_DIR ?? '/workspace/history')
 
