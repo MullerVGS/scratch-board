@@ -39,6 +39,10 @@ services:
       - ../:/workspace/repos/projetos:ro
       - ../pos:/workspace/repos/pos:ro
       - ../vend-server:/workspace/repos/vend-server:ro
+      # Repo aninhado (pessoal/tradutor-harness): o nome do mount tem que ser um segmento
+      # só, então o ref sai `tradutor-harness/.scratch/...` — válido porque existe um
+      # symlink `/root/projetos/tradutor-harness` → `pessoal/tradutor-harness`.
+      - ../pessoal/tradutor-harness:/workspace/repos/tradutor-harness:ro
 
       # Scratchpads de sessão dos agentes. **Não é uma origem**: é rascunho efêmero do
       # Claude, global, sem watcher e sem push. Read-only, como tudo aqui.
