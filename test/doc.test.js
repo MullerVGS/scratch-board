@@ -198,12 +198,18 @@ describe('normalizeStatus — vocabulário novo aparece, não some', () => {
   test('status fora do vocabulário vira `?<status>` — deve aparecer, não sumir', () => {
     assert.equal(normalizeStatus('em-analise'), '?em-analise')
   })
+
+  test('`open` é vocabulário do wayfinder, não desconhecido', () => {
+    assert.equal(normalizeStatus('open'), 'open')
+    assert.equal(normalizeStatus(' Open '), 'open')
+  })
 })
 
 describe('columnOf e isClosed', () => {
   test('cada status canônico cai na sua coluna', () => {
     assert.equal(columnOf('needs-triage'), 'triagem')
     assert.equal(columnOf('needs-info'), 'triagem')
+    assert.equal(columnOf('open'), 'pronto')
     assert.equal(columnOf('ready-for-agent'), 'pronto')
     assert.equal(columnOf('ready-for-human'), 'pronto')
     assert.equal(columnOf('claimed'), 'curso')
@@ -222,6 +228,7 @@ describe('columnOf e isClosed', () => {
     assert.equal(isClosed('resolved'), true)
     assert.equal(isClosed('done'), true)
     assert.equal(isClosed('claimed'), false)
+    assert.equal(isClosed('open'), false)
     assert.equal(isClosed('ready-for-agent'), false)
   })
 })

@@ -28,6 +28,7 @@ export function fleetSwitch(ns, on) {
 const STATUS_ORDER = [
   'needs-triage',
   'needs-info',
+  'open',
   'ready-for-agent',
   'ready-for-human',
   'claimed',

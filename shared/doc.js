@@ -17,15 +17,19 @@
  * lados, e é o que o mantém puro (`string → objeto`) e testável sem harness nenhum.
  */
 
-export const OPEN = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'claimed', 'partial']
+export const OPEN = ['needs-triage', 'needs-info', 'open', 'ready-for-agent', 'ready-for-human', 'claimed', 'partial']
 export const CLOSED = ['resolved', 'done', 'wontfix']
 export const KNOWN = [...OPEN, ...CLOSED]
 
 // Colunas do board. Um status desconhecido cai em `triagem` e o card mostra o rótulo cru,
 // para que um vocabulário novo apareça em vez de sumir.
+//
+// `open` é do wayfinder, e mora em `pronto` — não em `triagem`. Um ticket que o wayfinder
+// chartou já nasce especificado: ele não espera triagem, espera ser pego. É o mesmo estágio
+// de um `ready-for-agent`, e a frontier do grafo é feita deles.
 export const COLUMNS = [
   { id: 'triagem', label: 'Triagem', statuses: ['needs-triage', 'needs-info'] },
-  { id: 'pronto', label: 'Pronto', statuses: ['ready-for-agent', 'ready-for-human'] },
+  { id: 'pronto', label: 'Pronto', statuses: ['open', 'ready-for-agent', 'ready-for-human'] },
   { id: 'curso', label: 'Em curso', statuses: ['claimed', 'partial'] },
   { id: 'fechado', label: 'Fechado', statuses: ['resolved', 'done', 'wontfix'] },
 ]

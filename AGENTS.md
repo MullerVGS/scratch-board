@@ -588,9 +588,15 @@ Artifacts do claude.ai ficaram **de fora** por não existirem em disco: são uma
 ## Vocabulário de status
 
 Canônicos (`docs/agents/triage-labels.md`): `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
-Do wayfinder: `claimed`, `resolved`. Vistos na prática: `done`, `partial`.
+Do wayfinder: `open`, `claimed`, `resolved`. Vistos na prática: `done`, `partial`.
 
 Um status fora dessa lista é exibido com `?` e em vermelho — vocabulário novo deve **aparecer**, não sumir num balde de "outros".
+
+**Somar um status ao vocabulário reescreve o passado — e o catálogo grava isso como se fosse trabalho.** É a armadilha do `open`, e ela custa dinheiro no Gantt, que é retrospectivo e não se autocorrige. Enquanto `open` era desconhecido, o parser o normalizava para `?open` e o punha em `triagem`; no primeiro `sync()` depois da mudança, o `history.js` viu `?open → open` e persistiu **19 transições** que nunca aconteceram no disco. O efeito no `held` (`"em pronto há 0min"`) some na transição seguinte; o do Gantt, não — cada ticket ganhava uma faixa de **triagem** desde o charting, um estágio pelo qual ele jamais passou.
+
+O conserto é **rerrotular, não descartar**: as transições que o log guarda são reais (`ready-for-agent → open`, em 22/07) — errado estava o nome. Trocado `?x` por `x` em todas as linhas, a linha que o restart gravou vira `x → x`, e um `move` que não move nada sai fora (`observations()` não estenderia a trilha com ele). Feito com o container parado e backup antes; a trilha volta a apontar para a data real, e o `floor` (`≥`) reaparece sozinho onde o servidor de fato só encontrou o ticket já ali.
+
+**`open` mora em `pronto`, não em `triagem`**, e é a única entrada do vocabulário cuja coluna não se deduz do nome. Ele é o ticket que o wayfinder chartou e ainda ninguém pegou — o complemento exato do `claimed` (*"um ticket aberto e não atribuído é não reivindicado"*), e é dele que a frontier é feita. Nascido de um charting, ele **já está especificado**: não espera triagem, espera ser pego, que é o que `pronto` quer dizer. Cair no balde `?` era pior que feio: como todo desconhecido vai para `triagem`, o board mostrava um esforço inteiro de wayfinder empilhado na coluna de quem ainda não sabe o que fazer — e o `/wayfinder` do card oferecendo trabalhar um mapa que a tela dizia estar em triagem.
 
 ## Classificações do board
 
