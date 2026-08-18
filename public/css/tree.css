@@ -1,4 +1,217 @@
-/* tree — a árvore de arquivos do painel esquerdo (`#pane-left`). Vazio de propósito: o
-   `public/tree.js` desta tarefa é um stub; a tarefa seguinte desenha a árvore de verdade
-   e preenche esta folha. O `<link>` já existe no `index.html`, na ordem certa da
-   cascata, para essa tarefa não precisar mexer em nada além do conteúdo. */
+/* tree — a árvore de arquivos do painel esquerdo (`#pane-left`): pastas expansíveis, a linha
+   selecionada, o selo de status (`.chip`, definido em `components.css` — aqui só se lê o
+   `data-s` que `public/tree.js` escreve) e o `copyBtn` que aparece no hover da linha.
+
+   Mobile-first e por token: nenhuma media query de largura aqui — o painel já empilha ou vira
+   coluna em `shell.css`, que é quem decide a *forma*. O que muda com o dispositivo é só o
+   hover (`hover: none`), a mesma consulta que o resto do projeto usa para revelar o que
+   dependeria de um hover que não existe no dedo. */
+
+.tree {
+  padding: 4px 0;
+}
+
+.branch,
+.row {
+  min-width: 0;
+}
+
+/* ---------- a linha ---------- */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap);
+  /* `--depth` é escrita inline por `tree.js`, um nível por nó — não é token (não é cor nem
+     breakpoint, é geometria de uma folha só), então mora aqui, não em `base.css`. */
+  padding: 0 8px 0 calc(6px + var(--depth, 0) * 16px);
+  border-radius: var(--radius-sm);
+}
+
+.row:hover {
+  background: var(--panel-2);
+}
+
+/* A linha da rota atual — o único destaque persistente da árvore. Fundo tingido de accent,
+   não borda: numa lista estreita uma borda lateral empurra o texto 1px a cada re-render. */
+.row.selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.row.selected .name {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* O botão de copiar só existe pela metade até você passar o mouse na linha — a regra de
+   revelo é daqui, não de `components.css`: lá o `.copy` só sabe abrir e fechar (`opacity`),
+   quem decide *quando* é cada tela que o usa. */
+.row:hover .copy,
+.row:focus-within .copy {
+  opacity: 0.7;
+}
+
+/* O selo pode carregar vocabulário desconhecido (`?o-que-o-autor-escreveu`), e esse texto
+   não tem tamanho combinado — sem um teto ele estoura a linha. Trunca como o nome trunca;
+   o texto mora num `<span>` interno porque `text-overflow` não corta um contêiner flex. */
+.row .chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+}
+
+.row .chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ---------- o triângulo ---------- */
+
+.disclosure {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.disclosure:hover {
+  color: var(--text);
+  background: var(--panel-3);
+}
+
+.disclosure:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Pasta vazia: sem filho, sem o que abrir — o espaço fica reservado (o nome de toda linha
+   alinha na mesma coluna), mas não é botão nem recebe foco. */
+.disclosure.ghost {
+  cursor: default;
+}
+
+/* ---------- o nome ---------- */
+
+.name {
+  flex: 1 1 auto;
+  /* O nome resolve a rota — é o que menos pode sumir. `.title` cede espaço primeiro
+     (`flex-shrink` bem maior nele, abaixo); este piso garante alguns caracteres mesmo
+     quando disclosure, selo e `.meta` já tomaram quase tudo numa pasta funda. */
+  min-width: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 13px;
+  border-radius: 4px;
+}
+
+.dir .name {
+  font-weight: 600;
+}
+
+.name:hover {
+  color: var(--accent);
+}
+
+.name:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* O título do `.md` (quando ele tem `# Título`), esmaecido ao lado do nome do arquivo — o
+   nome do arquivo continua sendo o que resolve a rota; o título é só contexto de leitura.
+   `flex-shrink` bem mais alto que o do `.name` (acima): quando a linha aperta, é o título
+   que cede primeiro — o peso da redução é proporcional a `shrink × largura`, e como o
+   título já nasce mais largo (é uma frase, o nome é um arquivo), um shrink igual o
+   deixaria levar *mais* pixels, não menos. */
+.title {
+  flex: 0 6 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+/* ---------- o relativo e o copiar ----------
+
+   Os dois dividem o mesmo canto da linha, não colunas próprias lado a lado: um `copyBtn`
+   fica no DOM sempre, mesmo invisível (é o que o mantém alcançável por teclado —
+   `components.css` já é categórico sobre isso), e reservar-lhe uma largura fixa *além* do
+   relativo era exatamente o que faltava para zerar o nome — uma pasta a três níveis já tem
+   disclosure, selo e nome disputando ~300px, e sobrava quase nada para o nome. `.meta` mede
+   pelo `.age` (o que sempre está ali); `.copies` empilha por cima, `position: absolute`, e
+   por estar fora do fluxo não conta na largura do pai enquanto some — só ocupa a régua de
+   verdade quando aparece. */
+
+.meta {
+  flex: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+}
+
+.age {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: opacity 0.12s;
+}
+
+.row.selected .age {
+  color: var(--muted);
+}
+
+.copies {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* O relativo cede o canto ao copiar assim que a linha ganha hover ou foco — os dois por
+   cima um do outro leriam como ruído. */
+.row:hover .age,
+.row:focus-within .age {
+  opacity: 0;
+}
+
+/* Sem hover não há disputa de canto a resolver: no dedo o painel esquerdo empilha em
+   largura cheia (`shell.css`), não nos 300px fixos do desktop, e o `copyBtn` já fica
+   sempre visível (`components.css`) — então aqui os dois voltam ao fluxo normal, lado a
+   lado, em vez de empilhados. */
+@media (hover: none) {
+  .meta {
+    position: static;
+    gap: 4px;
+  }
+
+  .copies {
+    position: static;
+  }
+
+  .row:hover .age,
+  .row:focus-within .age {
+    opacity: 1;
+  }
+}
