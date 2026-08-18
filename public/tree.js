@@ -32,8 +32,7 @@ const expanded = new Set()
 /**
  * O relativo ("há 2h"), calculado no cliente a partir do `mtime` absoluto — nunca vindo do
  * servidor (uma string relativa envelheceria sozinha e empurraria o board parado). Desce de
- * unidade conforme o intervalo, do mesmo jeito que `columnLabel()` (`issues.js`) já faz para
- * o tempo em coluna: dias, senão horas, senão minutos — dias em dígito plural.
+ * unidade conforme o intervalo: dias, senão horas, senão minutos — dias em dígito plural.
  */
 function ago(mtime, now = Date.now()) {
   const ms = Math.max(0, now - mtime)

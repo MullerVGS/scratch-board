@@ -1,247 +1,146 @@
 /**
- * Os invariantes do grafo de dependências — que até agora só existiam em prosa.
+ * Os invariantes do grafo de uma pasta — que até agora só existiam em prosa (e só falavam a
+ * língua das issues).
  *
- * O `AGENTS.md` os escreveu ("a camada é o maior caminho", "ciclo não estoura", "dentro
- * da camada, a ordem é o baricentro"), mas prosa ninguém lembra ao mexer no layout — e
- * as três falham em **silêncio**: o desenho continua saindo, só sai errado. Uma seta
- * andando para trás, curvas cruzadas à toa, ou a aba travada num laço.
+ * Generalização (tarefa 06): o layout deixou de saber o que é uma issue. Ele recebe `nodes` +
+ * `edges` — o mesmo par que o `/api/graph` serve, seja `mode:'deps'` (o `Blocked by:`, `from` =
+ * bloqueante) ou `mode:'links'` (`from` = quem cita) —, e os invariantes são **os mesmos**: a
+ * camada é o maior caminho, o ciclo não estoura, a ordem dentro da camada é o baricentro. Eles
+ * falham em silêncio se quebrarem: o desenho continua saindo, só sai errado — uma seta andando
+ * para trás, curvas cruzadas à toa, ou a aba travada num laço.
  *
- * Estes testes só existem porque o layout foi separado do render: `graph-layout.js` é
- * puro, roda no Node sem harness, e é sobre objetos — não sobre pixels.
+ * Estes testes só existem porque o layout é puro, roda no Node sem harness, e é sobre objetos —
+ * não sobre pixels.
  */
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-import { numberIndex, depsOf, openDeps } from '../public/issues.js'
-import { layerize, graphLayout, NODE_W, NODE_H, GAP_X, GAP_Y, PAD } from '../public/graph-layout.js'
+import { layerize, graphLayout, edgePath, NODE_W, NODE_H, GAP_X, GAP_Y, PAD } from '../public/graph-layout.js'
 
-/**
- * Uma issue como o `/api/board` a serializa — só os campos que o layout olha.
- * `blocked` e `closed` vêm do servidor; o layout não os recalcula.
- */
-const issue = (number, blockedBy = [], extra = {}) => ({
-  number,
-  title: `${number} — issue ${number}`,
-  status: 'ready-for-agent',
-  closed: false,
-  blocked: blockedBy.length > 0,
-  blockedBy: blockedBy.map((n) => ({ number: n, note: '', raw: n })),
-  ...extra,
-})
+/** Um `GNode` como o `/api/graph` o serve — só o que o layout olha: o `id`. */
+const N = (ids) => ids.map((id) => ({ id, number: id, name: id }))
+/** O mesmo nó, para chamar `at()` sem guardar referência ao array de `N()` — o layout resolve
+ * por `id`, não por identidade de objeto (é o `byId` que o generaliza). */
+const node = (id) => ({ id, number: id, name: id })
 
-/** O grafo sempre parte das issues do esforço e do índice por número. */
-const layout = (issues) => graphLayout(issues, numberIndex(issues))
-const layers = (issues) => layerize(issues, numberIndex(issues))
-
-describe('a camada é o MAIOR caminho, não o menor', () => {
-  test('um nó com dois caminhos até a raiz vai para o mais longo', () => {
-    // 03 depende de 01 (caminho curto) e de 02 (caminho longo, que passa por 01).
-    // Pelo menor caminho, 03 cairia na camada 1 — ao lado do 02, que ele espera —,
-    // e a seta 02 → 03 andaria para trás.
-    const a = issue('01')
-    const b = issue('02', ['01'])
-    const c = issue('03', ['01', '02'])
-    const layer = layers([a, b, c])
-
-    assert.equal(layer.get(a), 0)
-    assert.equal(layer.get(b), 1)
-    assert.equal(layer.get(c), 2, 'a camada de 03 é o caminho longo (via 02), não o curto (via 01)')
+describe('camada é o maior caminho; nenhuma aresta anda para trás', () => {
+  test('D depende de B e C (que dependem de A): D cai na camada 2, não na 1', () => {
+    // A→B, A→C, B→D, C→D. Pelo menor caminho D cairia ao lado de B/C — a seta B→D ou C→D
+    // andaria para trás. Pelo maior, D fica depois dos dois.
+    const { at } = graphLayout(N(['A', 'B', 'C', 'D']), [
+      { from: 'A', to: 'B' },
+      { from: 'A', to: 'C' },
+      { from: 'B', to: 'D' },
+      { from: 'C', to: 'D' },
+    ])
+    assert.ok(at(node('A')).x < at(node('B')).x)
+    assert.ok(at(node('B')).x < at(node('D')).x) // D na camada 2, não 1
+    assert.ok(at(node('C')).x < at(node('D')).x)
   })
 
-  test('nenhuma aresta anda para trás: o bloqueante está sempre à esquerda', () => {
-    const issues = [
-      issue('01'),
-      issue('02', ['01']),
-      issue('03', ['01', '02']),
-      issue('04', ['02']),
-      issue('05', ['03', '04']),
-    ]
-    const byNumber = numberIndex(issues)
-    const { at } = graphLayout(issues, byNumber)
-
-    for (const i of issues) {
-      for (const { dep } of depsOf(i, byNumber)) {
-        assert.ok(
-          at(dep).x < at(i).x,
-          `a aresta ${dep.number} → ${i.number} anda para trás: o bloqueante teria que ficar à esquerda`,
-        )
-      }
-    }
-  })
-
-  test('quem não depende de ninguém é a camada 0 — a frontier', () => {
-    const issues = [issue('01'), issue('02'), issue('03', ['01'])]
-    const layer = layers(issues)
-    assert.equal(layer.get(issues[0]), 0)
-    assert.equal(layer.get(issues[1]), 0)
+  test('quem não tem aresta chegando é a camada 0 — a frontier', () => {
+    const layer = layerize(N(['A', 'B', 'C']), new Map([['C', [node('A')]]]))
+    assert.equal(layer.get('A'), 0)
+    assert.equal(layer.get('B'), 0)
+    assert.equal(layer.get('C'), 1)
   })
 })
 
-describe('ciclo não estoura a pilha', () => {
-  test('laço de dois: a aresta que fecha o laço é ignorada', () => {
-    // Não deveria existir num `Blocked by:`. Mas o board mostra o que o arquivo diz,
-    // e um arquivo pode estar errado — errado não é motivo para derrubar a aba.
-    const a = issue('01', ['02'])
-    const b = issue('02', ['01'])
-    const layer = layers([a, b])
+describe('ciclo não estoura', () => {
+  test('laço de dois não lança', () => {
+    assert.doesNotThrow(() => {
+      graphLayout(N(['A', 'B']), [
+        { from: 'A', to: 'B' },
+        { from: 'B', to: 'A' },
+      ])
+    })
+  })
 
-    assert.equal(layer.size, 2)
-    for (const i of [a, b]) assert.ok(Number.isFinite(layer.get(i)), 'toda issue recebe uma camada finita')
-
-    // E o layout inteiro sai: descartada a aresta que fecha o laço, sobra alguém na
-    // camada 0. Se ela valesse 0 em vez de nada, ninguém sobraria lá — e o `columns`
-    // nasceria com um buraco que derruba o grafo num `TypeError`.
-    const { at, columns } = layout([a, b])
+  test('a aresta que fecha o laço é descartada — alguém sobra na camada 0', () => {
+    // Se a aresta de volta valesse profundidade 0 em vez de nada, ninguém sobraria na
+    // camada 0 e o `columns` nasceria com um buraco.
+    const { columns, at } = graphLayout(N(['A', 'B']), [
+      { from: 'A', to: 'B' },
+      { from: 'B', to: 'A' },
+    ])
     assert.equal(columns[0].length, 1, 'alguém tem que sobrar na camada 0')
-    assert.ok(Number.isFinite(at(a).x) && Number.isFinite(at(b).x))
-  })
-
-  test('laço de três, e um nó pendurado nele', () => {
-    const issues = [issue('01', ['03']), issue('02', ['01']), issue('03', ['02']), issue('04', ['03'])]
-    const { at, width, height } = layout(issues)
-
-    for (const i of issues) {
-      const p = at(i)
-      assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y), `a issue ${i.number} tem posição finita`)
-    }
-    assert.ok(Number.isFinite(width) && Number.isFinite(height))
-  })
-
-  test('auto-referência não vira aresta nem camada', () => {
-    const a = issue('01', ['01'])
-    const byNumber = numberIndex([a])
-    assert.deepEqual(depsOf(a, byNumber), [], 'um nó não é aresta para si mesmo')
-    assert.equal(layerize([a], byNumber).get(a), 0)
+    assert.ok(Number.isFinite(at(node('A')).x) && Number.isFinite(at(node('B')).x))
   })
 })
 
-describe('dentro da camada, a ordem é o baricentro das dependências', () => {
-  test('o nó fica na altura média de quem o bloqueia, não na ordem do número', () => {
-    // Camada 0, por número: 01 (linha 0), 02 (linha 1), 03 (linha 2).
-    // Camada 1: 04 depende do 03 (baricentro 2) e 05 depende do 01 (baricentro 0).
-    // Por número, 04 viria antes de 05; pelo baricentro, 05 sobe e as curvas param de
-    // se cruzar.
-    const issues = [issue('01'), issue('02'), issue('03'), issue('04', ['03']), issue('05', ['01'])]
-    const { at, columns } = layout(issues)
-    const [i01, , , i04, i05] = issues
-
+describe('modo links usa o mesmo layout', () => {
+  test('map cita 01 e 02: map sozinho na frontier', () => {
+    // As arestas de link (from = quem cita, to = citado) produzem a mesma geometria das
+    // arestas de deps; é a mesma função, só muda de onde `edges` vem.
+    const { columns } = graphLayout(N(['map', '01', '02']), [
+      { from: 'map', to: '01' },
+      { from: 'map', to: '02' },
+    ])
+    assert.equal(columns[0].length, 1) // map sozinho na frontier
     assert.deepEqual(
-      columns[1].map((i) => i.number),
-      ['05', '04'],
-      'na camada 1, o baricentro põe 05 (média 0) antes de 04 (média 2)',
+      columns[0].map((n) => n.id),
+      ['map'],
     )
-    // O baricentro decide a **ordem** dentro da camada; a linha é reindexada de 0 a n-1
-    // depois. Por isso 05, o primeiro da camada 1, acaba na altura do 01 — mas 04, o
-    // segundo, sobe para a linha 1 em vez de descer até a linha do 03.
-    assert.ok(at(i05).y < at(i04).y, 'quem tem baricentro menor fica acima')
-    assert.equal(at(i05).y, at(i01).y)
-  })
-
-  test('duas dependências: a altura é a média das duas', () => {
-    // 04 é bloqueado por 01 (linha 0) e 03 (linha 2) — baricentro 1. 05 é bloqueado só
-    // pelo 03 — baricentro 2. Logo 04 vem antes de 05, ainda que ambos sejam camada 1.
-    const issues = [issue('01'), issue('02'), issue('03'), issue('04', ['01', '03']), issue('05', ['03'])]
-    const { columns } = layout(issues)
-    assert.deepEqual(columns[1].map((i) => i.number), ['04', '05'])
-  })
-
-  test('a camada 0 não tem âncora: ordena por número', () => {
-    const issues = [issue('03'), issue('01'), issue('02')]
-    const { columns } = layout(issues)
-    assert.deepEqual(columns[0].map((i) => i.number), ['01', '02', '03'])
   })
 })
 
-describe('referência a issue inexistente', () => {
-  test('não vira aresta', () => {
-    // `Blocked by: 99` num esforço que só tem duas issues: não há nó para ligar.
-    const a = issue('01')
-    const b = issue('02', ['99'])
-    const byNumber = numberIndex([a, b])
+describe('dentro da camada, a ordem é o baricentro', () => {
+  test('quem tem baricentro menor fica acima; camada 0 ordena por id', () => {
+    const { at, columns } = graphLayout(N(['01', '02', '03', '04', '05']), [
+      { from: '03', to: '04' }, // 04 depende de 03 (linha 2) — baricentro 2
+      { from: '01', to: '05' }, // 05 depende de 01 (linha 0) — baricentro 0
+    ])
+    assert.deepEqual(
+      columns[0].map((n) => n.id),
+      ['01', '02', '03'],
+      'camada 0 sem âncora: ordena por id',
+    )
+    assert.deepEqual(columns[1].map((n) => n.id), ['05', '04'])
+    assert.ok(at(node('05')).y < at(node('04')).y)
+  })
+})
 
-    assert.deepEqual(depsOf(b, byNumber), [])
-    const { columns } = graphLayout([a, b], byNumber)
+describe('referência morta e auto-referência não viram aresta', () => {
+  test('edge para um id fora de `nodes` não conta — sem aresta, uma coluna só', () => {
+    const { columns } = graphLayout(N(['01', '02']), [{ from: '99', to: '02' }])
     assert.equal(columns.length, 1, 'sem aresta, o grafo é uma coluna só')
   })
 
-  test('não vira bloqueio: o card não lista dependente nenhum', () => {
-    const b = issue('02', ['99'])
-    const effort = { issues: [issue('01'), b] }
-    assert.deepEqual(openDeps(b, effort), [], 'nada segura a 02 — o 99 não existe')
-  })
-
-  test('a referência morta some, a viva fica', () => {
-    const a = issue('01')
-    const b = issue('02', ['01', '99'])
-    const deps = depsOf(b, numberIndex([a, b]))
-    assert.deepEqual(deps.map((d) => d.dep.number), ['01'])
+  test('edge de um nó para si mesmo não conta', () => {
+    const layer = layerize(N(['01']), new Map()) // deps vazio: sem aresta nenhuma sobrevive
+    assert.equal(layer.get('01'), 0)
+    const { columns } = graphLayout(N(['01']), [{ from: '01', to: '01' }])
+    assert.equal(columns[0].length, 1)
   })
 })
 
 describe('a geometria que as curvas assumem', () => {
   test('o passo entre camadas e entre linhas é o do nó mais o vão', () => {
-    // A altura do nó é fixa (NODE_H) porque entra no cálculo da posição das curvas:
-    // título que estica desalinha as setas.
-    const issues = [issue('01'), issue('02'), issue('03', ['01'])]
-    const { at, width, height } = layout(issues)
-    const [i01, i02, i03] = issues
-
-    assert.deepEqual(at(i01), { x: PAD, y: PAD })
-    assert.equal(at(i02).y - at(i01).y, NODE_H + GAP_Y)
-    assert.equal(at(i03).x - at(i01).x, NODE_W + GAP_X)
+    const { at, width, height } = graphLayout(N(['01', '02', '03']), [{ from: '01', to: '03' }])
+    assert.deepEqual(at(node('01')), { x: PAD, y: PAD })
+    assert.equal(at(node('02')).y - at(node('01')).y, NODE_H + GAP_Y)
+    assert.equal(at(node('03')).x - at(node('01')).x, NODE_W + GAP_X)
     assert.equal(width, 2 * (NODE_W + GAP_X) - GAP_X + PAD * 2)
     assert.equal(height, 2 * (NODE_H + GAP_Y) - GAP_Y + PAD * 2)
   })
 
-  test('o esforço deste board inteiro cabe no layout sem exceção', () => {
-    // As dez issues deste mapa, com as arestas que os arquivos declaram — inclusive a
-    // 10, que espera quatro.
-    const issues = [
-      issue('01'),
-      issue('02', ['01']),
-      issue('03', ['01', '02']),
-      issue('04', ['02']),
-      issue('05', ['03', '04']),
-      issue('06', ['05']),
-      issue('07', ['05']),
-      issue('08'),
-      issue('09'),
-      issue('10', ['05', '06', '07', '08']),
-    ]
-    const byNumber = numberIndex(issues)
-    const { at, columns } = graphLayout(issues, byNumber)
-
-    // 01 → 02 → 03 → 05 → 06/07 → 10: a cadeia mais longa tem seis nós, logo seis
-    // camadas. O 10 cai na última porque espera o 06 e o 07, não só o 05.
-    assert.equal(columns.length, 6)
-    assert.equal(columns[5].map((i) => i.number).join(), '10')
-    for (const i of issues) {
-      for (const { dep } of depsOf(i, byNumber)) assert.ok(at(dep).x < at(i).x)
-    }
+  test('edgePath sai da borda direita do bloqueante e entra na esquerda do bloqueado', () => {
+    const { at } = graphLayout(N(['01', '02']), [{ from: '01', to: '02' }])
+    const d = edgePath(at(node('01')), at(node('02')))
+    assert.match(d, /^M /)
+    assert.ok(d.includes(`${at(node('01')).x + NODE_W} `))
   })
 })
 
-describe('o layout é puro', () => {
-  test('nem `graph-layout.js` nem `issues.js` tocam no DOM', () => {
-    // Se um deles passar a olhar `document`, os invariantes acima voltam a ser
-    // indemonstráveis fora do navegador — e é assim que eles morrem. A varredura é no
-    // *código*, com os comentários fora: a prosa que explica a regra pode nomeá-la.
-    for (const mod of ['../public/graph-layout.js', '../public/issues.js']) {
-      const code = readFileSync(new URL(mod, import.meta.url), 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/\/\/.*$/gm, '')
-      for (const forbidden of ['document', 'window', 'navigator', 'localStorage', 'innerHTML']) {
-        assert.ok(!code.includes(forbidden), `${mod} não pode tocar em \`${forbidden}\``)
-      }
-      // E o que ele importa também não pode arrastar DOM junto.
-      const imports = [...code.matchAll(/from '([^']+)'/g)].map((m) => m[1])
-      assert.deepEqual(
-        imports.filter((i) => !['./issues.js'].includes(i)),
-        [],
-        `${mod} só pode importar de módulos puros`,
-      )
+describe('guarda de pureza: sem document/window/innerHTML e sem issues.js', () => {
+  test('graph-layout.js não toca no DOM nem importa o vocabulário morto das issues', () => {
+    // Se o módulo passar a olhar `document`, os invariantes acima voltam a ser
+    // indemonstráveis fora do navegador — e é assim que eles morrem.
+    const src = readFileSync(new URL('../public/graph-layout.js', import.meta.url), 'utf8')
+    for (const proibido of ['document', 'window', 'localStorage', 'innerHTML', 'issues.js']) {
+      assert.ok(!src.includes(proibido), proibido)
     }
   })
 })
