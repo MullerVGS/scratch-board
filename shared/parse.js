@@ -2,8 +2,8 @@
  * O dialeto do `.scratch/`, num lugar só.
  *
  * Este módulo é o parser dos `.md` que as skills escrevem: o cabeçalho `Chave: valor`,
- * o vocabulário de status, as colunas do board e o `Blocked by:` que promete uma lista
- * de números e entrega prosa.
+ * o vocabulário de status e o `Blocked by:` que promete uma lista de números e entrega
+ * prosa.
  *
  * Ele existiu **duas vezes** — uma no `server.js`, outra no `public/md.js` — e as duas
  * cópias divergiram: o servidor guardava o fragmento inteiro do `Blocked by:` e o
@@ -20,22 +20,6 @@
 export const OPEN = ['needs-triage', 'needs-info', 'open', 'ready-for-agent', 'ready-for-human', 'claimed', 'partial']
 export const CLOSED = ['resolved', 'done', 'wontfix']
 export const KNOWN = [...OPEN, ...CLOSED]
-
-// Colunas do board. Um status desconhecido cai em `triagem` e o card mostra o rótulo cru,
-// para que um vocabulário novo apareça em vez de sumir.
-//
-// `open` é do wayfinder, e mora em `pronto` — não em `triagem`. Um ticket que o wayfinder
-// chartou já nasce especificado: ele não espera triagem, espera ser pego. É o mesmo estágio
-// de um `ready-for-agent`, e a frontier do grafo é feita deles.
-export const COLUMNS = [
-  { id: 'triagem', label: 'Triagem', statuses: ['needs-triage', 'needs-info'] },
-  { id: 'pronto', label: 'Pronto', statuses: ['open', 'ready-for-agent', 'ready-for-human'] },
-  { id: 'curso', label: 'Em curso', statuses: ['claimed', 'partial'] },
-  { id: 'fechado', label: 'Fechado', statuses: ['resolved', 'done', 'wontfix'] },
-]
-
-export const columnOf = (status) =>
-  COLUMNS.find((c) => c.statuses.includes(status))?.id ?? 'triagem'
 
 export const isClosed = (status) => CLOSED.includes(status)
 
@@ -74,54 +58,6 @@ export function parseDoc(raw) {
   }
   const title = lines.find((l) => l.startsWith('# '))?.slice(2).trim()
   return { header, title }
-}
-
-/**
- * O primeiro parágrafo em prosa do documento — o que o esforço *é*, em uma frase.
- *
- * Um slug (`pos-2101-flapping-guard`) não conta história nenhuma, e abrir o PRD para
- * lembrar custa uma navegação. O parágrafo que o autor escreveu primeiro quase sempre
- * conta; é ele que o card mostra.
- *
- * **Começa depois do preâmbulo**, e essa é a decisão que faz o resumo prestar. O
- * preâmbulo é cabeçalho — e não só as chaves de `HEADER_KEYS`: os documentos trazem
- * `Data:`, `Labels:` e o que mais o autor inventar. Filtrar por lista de chaves
- * conhecidas deixaria "Data: 2026-07-12" virar o resumo de um PRD. A fronteira do
- * `## ` não depende de adivinhar chave nenhuma: acima dela é metadado, abaixo é texto.
- *
- * Documento sem seção alguma cai para o corpo inteiro — é tudo que ele tem.
- */
-export function summarize(raw) {
-  const lines = raw.split('\n')
-  const start = preambleEnd(lines)
-  const body = start === lines.length ? lines : lines.slice(start)
-
-  const para = []
-  let fenced = false
-
-  for (const line of body) {
-    const t = line.trim()
-    if (t.startsWith('```')) {
-      fenced = !fenced
-      continue
-    }
-    if (fenced) continue
-
-    // Bullet, tabela e citação ficam de fora: fora de contexto, informam menos que nada.
-    const prose =
-      t &&
-      !t.startsWith('#') &&
-      !t.startsWith('|') &&
-      !t.startsWith('>') &&
-      !t.startsWith('---') &&
-      !/^([-*+]|\d+\.)\s/.test(t)
-
-    if (prose) para.push(t)
-    else if (para.length) break // o primeiro parágrafo basta
-  }
-
-  const text = para.join(' ').replace(/[*`]/g, '')
-  return text.length > 320 ? `${text.slice(0, 317).trimEnd()}…` : text
 }
 
 /**
@@ -183,11 +119,3 @@ export function relLinks(raw) {
   }
   return out
 }
-
-/**
- * Tira o prefixo de numeração de issue do título — `"01 — Extrair"` vira `"Extrair"`.
- *
- * O `.md` repete a numeração no `# Título` para que o arquivo se leia sozinho; colar
- * esse título num prompt não deveria carregar o número junto.
- */
-export const cleanTitle = (s) => s.replace(/^\s*\d+\s*[—-]\s*/, '')

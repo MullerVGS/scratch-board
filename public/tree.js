@@ -29,6 +29,15 @@ const state = { container: null, ns: null, board: null, selectedPath: null }
 const expanded = new Set()
 
 /**
+ * O `selectedPath` do último `renderTree()`. Um `board:push` da origem ativa chama
+ * `renderTree()` de novo com o **mesmo** `selectedPath` — é o caso comum, o board vivo — e
+ * rodar `ensureVisible` a cada vez reabriria, no próximo frame, a pasta que o clique no
+ * triângulo acabou de fechar. Só quando o `selectedPath` muda de fato (navegação, deep-link)
+ * é que há uma seleção nova a revelar.
+ */
+let lastSelected = null
+
+/**
  * O relativo ("há 2h"), calculado no cliente a partir do `mtime` absoluto — nunca vindo do
  * servidor (uma string relativa envelheceria sozinha e empurraria o board parado). Desce de
  * unidade conforme o intervalo: dias, senão horas, senão minutos — dias em dígito plural.
@@ -170,6 +179,10 @@ function nodeEl(node, depth, ns, selectedPath) {
  * por rota direta (carga a frio, link colado) apareceria "selecionada" dentro de uma pasta
  * fechada, invisível. Mutação no `Set` de módulo: uma vez aberta para mostrar a seleção, a
  * pasta continua aberta como qualquer outra — é o comportamento comum de expansão.
+ *
+ * Chamada só por `renderTree()`, e só quando o `selectedPath` muda (`lastSelected`) — nunca
+ * a cada `board:push` com a mesma seleção, senão um save legítimo reabriria a pasta que o
+ * clique no triângulo acabou de fechar.
  */
 function ensureVisible(nodes, selectedPath) {
   if (!selectedPath) return
@@ -223,6 +236,7 @@ export function renderTree(container, ns, board, selectedPath) {
   state.ns = ns
   state.board = board
   state.selectedPath = selectedPath
-  if (board.tree?.length) ensureVisible(board.tree, selectedPath)
+  if (board.tree?.length && selectedPath !== lastSelected) ensureVisible(board.tree, selectedPath)
+  lastSelected = selectedPath
   redraw()
 }

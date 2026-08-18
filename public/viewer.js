@@ -57,8 +57,24 @@ const trail = []
  */
 let shown = null
 
-/** Um alvo de link que não está na árvore (aponta para fora do projetado): o `ref` é o próprio caminho. */
-const synthNode = (p) => ({ name: p.slice(p.lastIndexOf('/') + 1), path: p, ref: p })
+/**
+ * Um alvo de link que não está na árvore (aponta para fora do projetado). O `path` continua
+ * sendo o caminho do container — é por ele que se lê —, mas o `ref` **não pode ser** esse
+ * mesmo caminho: `path` é `/workspace/...`, e essa string nunca pode aparecer na tela (é o
+ * que a barra copiável mostra). Deriva o `ref` de workspace trocando o prefixo do `root` do
+ * container pelo `ref` da origem, do mesmo jeito que o servidor faz (`refIn`, `src/paths.js`);
+ * sem como derivar — a origem ainda não chegou —, cai no nome bruto do arquivo.
+ */
+const synthNode = (p) => {
+  const board = state.boards[open?.ns]
+  const root = board?.root
+  let ref = p.slice(p.lastIndexOf('/') + 1) // fallback: nome bruto, nunca o caminho cru
+  if (root && board?.ref && (p === root || p.startsWith(root + '/'))) {
+    const rest = p.slice(root.length).replace(/^\//, '')
+    ref = rest ? `${board.ref}/${rest}` : board.ref
+  }
+  return { name: p.slice(p.lastIndexOf('/') + 1), path: p, ref }
+}
 
 /** Acha um nó pelo `path` do container, em qualquer profundidade — a árvore não é plana. */
 function findByPath(nodes, p) {
@@ -259,19 +275,12 @@ async function render(live) {
     return
   }
   // `413` (grande demais para exibir) e qualquer outro erro: o corpo cru, literal, sem realce.
+  // `/api/file` responde sempre `text/plain` (`src/server.js`) — o corpo já é a mensagem.
   if (!res.ok) {
     shown = null
     open.container.classList.remove('md')
     open.container.classList.add('raw')
-    let msg = text
-    if (res.headers.get('content-type')?.includes('json')) {
-      try {
-        msg = JSON.parse(text).error ?? text
-      } catch {
-        /* corpo não era JSON — fica o texto cru */
-      }
-    }
-    doc.textContent = msg
+    doc.textContent = text
     return
   }
 

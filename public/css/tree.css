@@ -214,4 +214,11 @@
   .row:focus-within .age {
     opacity: 1;
   }
+
+  /* No dedo o alvo de toque vale a mesma régua do `.copy` e do `button.icon` — 20px é fino
+     demais para o polegar, mesmo o triângulo desenhando pouco. */
+  .disclosure {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
 }

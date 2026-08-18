@@ -97,7 +97,7 @@ O `EventSource` reconecta sozinho, e o snapshot manda o board inteiro relido —
 
 ## O parser existe uma vez: `shared/parse.js`
 
-`parseDoc()`, `normalizeStatus()`, `KNOWN`, `parseBlockedBy()`/`splitBlockedBy()`, `relLinks()`, `cleanTitle()` — um arquivo só, importado pelo servidor **e** pelo browser (servido em `/shared/`). É **puro** (`string → objeto`) e **não pode tocar `node:` nem o DOM**. Já existiu duplicado (uma cópia no servidor, outra no cliente), e as cópias divergiram — o servidor era a errada.
+`parseDoc()`, `normalizeStatus()`, `KNOWN`, `parseBlockedBy()`/`splitBlockedBy()`, `relLinks()` — um arquivo só, importado pelo servidor **e** pelo browser (servido em `/shared/`). É **puro** (`string → objeto`) e **não pode tocar `node:` nem o DOM**. Já existiu duplicado (uma cópia no servidor, outra no cliente), e as cópias divergiram — o servidor era a errada.
 
 - **Três dialetos de cabeçalho.** As chaves `Chave: valor` podem vir **antes** do `# Título` (wayfinder) ou **depois** (issue tracker). `parseDoc()` varre o **preâmbulo inteiro** (até o primeiro `## `) e só aceita as chaves de `HEADER_KEYS`, para que prosa com dois-pontos não vire estado. Há `Status:` em corpo de issue; a fronteira do `## ` é o que o barra.
 - **`Blocked by:` traz prosa.** Na prática: `01 (resolvido), 08 — a revisão achou defeito…`. Só o número que **abre** cada fragmento separado por vírgula é referência; o resto é a justificativa. `parseBlockedBy()` quebra em `{ number, note }`; um fragmento sem número que o abra não vira aresta.
@@ -155,7 +155,7 @@ Testes — as costuras caem onde o código é puro ou onde ele fala HTTP (não h
 
 | Costura | O que trava |
 | --- | --- |
-| `test/parse.test.js` | O parser: os três dialetos, o `Status:` de corpo que não vira estado, o `Blocked by:` com prosa, o `summarize()` pulando o preâmbulo, o desconhecido virando `?`. |
+| `test/parse.test.js` | O parser: os três dialetos, o `Status:` de corpo que não vira estado, o `Blocked by:` com prosa, o desconhecido virando `?`. |
 | `test/md.test.js` | O renderer: a ordem das transformações e o `Blocked by:` que linka sem engolir a justificativa. |
 | `test/tree.test.js` | A árvore: ordenação por data, pasta herdando a recência do conteúdo, arquivo genérico sem selo, selo oportunista, o `ref` de topo sem vazar `/workspace/`. |
 | `test/graph-layout.test.js` | Os invariantes do grafo (puros): camada = maior caminho, nenhuma aresta para trás, ciclo que não estoura, baricentro, e o guarda de pureza. |

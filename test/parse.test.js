@@ -14,14 +14,11 @@ import assert from 'node:assert/strict'
 
 import {
   parseDoc,
-  summarize,
   normalizeStatus,
   parseBlockedBy,
-  columnOf,
   isClosed,
   preambleEnd,
   relLinks,
-  cleanTitle,
 } from '../shared/parse.js'
 
 describe('parseDoc — os três dialetos de cabeçalho', () => {
@@ -136,56 +133,6 @@ describe('parseBlockedBy — número e prosa, separados', () => {
   })
 })
 
-describe('summarize — o primeiro parágrafo em prosa, depois do preâmbulo', () => {
-  test('começa depois do preâmbulo: `Data:` no topo não vira o resumo', () => {
-    const raw = ['Data: 2026-07-12', 'Labels: infra', '', '# PRD', '', '## Contexto', '', 'O board relê o disco a cada request.'].join('\n')
-    assert.equal(summarize(raw), 'O board relê o disco a cada request.')
-  })
-
-  test('linhas contíguas viram um parágrafo só, e o primeiro basta', () => {
-    const raw = ['# T', '', '## S', '', 'Primeira linha.', 'Segunda linha.', '', 'Outro parágrafo.'].join('\n')
-    assert.equal(summarize(raw), 'Primeira linha. Segunda linha.')
-  })
-
-  test('bullets, tabelas, citações e blocos de código são pulados', () => {
-    const raw = [
-      '# T',
-      '',
-      '## S',
-      '',
-      '- um bullet',
-      '1. um item numerado',
-      '| tabela |',
-      '> uma citação',
-      '---',
-      '```js',
-      'const x = 1',
-      '```',
-      '',
-      'A prosa de verdade.',
-    ].join('\n')
-    assert.equal(summarize(raw), 'A prosa de verdade.')
-  })
-
-  test('sem seção alguma, cai para o corpo inteiro — é tudo que o documento tem', () => {
-    assert.equal(summarize('# Título\n\nÚnico parágrafo.'), 'Único parágrafo.')
-  })
-
-  test('asteriscos e crases saem do resumo — ele é texto, não markdown', () => {
-    assert.equal(summarize('## S\n\nO `md.js` é **deliberado**.'), 'O md.js é deliberado.')
-  })
-
-  test('acima de 320 caracteres, corta com reticência', () => {
-    const out = summarize(`## S\n\n${'a'.repeat(400)}`)
-    assert.equal(out.length, 318)
-    assert.ok(out.endsWith('…'))
-  })
-
-  test('documento sem prosa nenhuma resume para string vazia', () => {
-    assert.equal(summarize('# T\n\n## S\n\n- só bullets\n- e mais bullets'), '')
-  })
-})
-
 describe('normalizeStatus — vocabulário novo aparece, não some', () => {
   test('status conhecido passa; a caixa é normalizada', () => {
     assert.equal(normalizeStatus('ready-for-agent'), 'ready-for-agent')
@@ -207,24 +154,7 @@ describe('normalizeStatus — vocabulário novo aparece, não some', () => {
   })
 })
 
-describe('columnOf e isClosed', () => {
-  test('cada status canônico cai na sua coluna', () => {
-    assert.equal(columnOf('needs-triage'), 'triagem')
-    assert.equal(columnOf('needs-info'), 'triagem')
-    assert.equal(columnOf('open'), 'pronto')
-    assert.equal(columnOf('ready-for-agent'), 'pronto')
-    assert.equal(columnOf('ready-for-human'), 'pronto')
-    assert.equal(columnOf('claimed'), 'curso')
-    assert.equal(columnOf('partial'), 'curso')
-    assert.equal(columnOf('resolved'), 'fechado')
-    assert.equal(columnOf('done'), 'fechado')
-    assert.equal(columnOf('wontfix'), 'fechado')
-  })
-
-  test('status desconhecido cai em triagem, com o rótulo cru preservado pelo `?`', () => {
-    assert.equal(columnOf('?em-analise'), 'triagem')
-  })
-
+describe('isClosed', () => {
   test('wontfix fecha — é uma decisão, não um limbo', () => {
     assert.equal(isClosed('wontfix'), true)
     assert.equal(isClosed('resolved'), true)
@@ -238,10 +168,4 @@ describe('columnOf e isClosed', () => {
 test('relLinks pega só links relativos, dedup, em ordem', () => {
   const raw = 'ver [a](../a.md) e [b](./b.md), [ext](https://x.com), [anc](#top), [abs](/c.md), [a2](../a.md)'
   assert.deepEqual(relLinks(raw), ['../a.md', './b.md'])
-})
-
-test('cleanTitle tira o prefixo de numeração', () => {
-  assert.equal(cleanTitle('01 — Extrair o parser'), 'Extrair o parser')
-  assert.equal(cleanTitle('7 - Gaveta viva'), 'Gaveta viva')
-  assert.equal(cleanTitle('Sem número'), 'Sem número')
 })

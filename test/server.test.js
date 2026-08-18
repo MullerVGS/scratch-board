@@ -387,6 +387,15 @@ test('/api/file recusa um caminho fora dos roots', async () => {
   assert.equal(vazio.status, 400)
 })
 
+test('/api/graph recusa um caminho fora dos roots — mesmo `safePath()` do /api/file', async () => {
+  const fora = await get('/api/graph?ns=projetos&path=/etc')
+  assert.equal(fora.status, 400)
+  assert.match((await fora.json()).error, /fora dos diretórios permitidos/)
+
+  const traversal = await get(`/api/graph?ns=projetos&path=${encodeURIComponent(join(root, '../../etc'))}`)
+  assert.equal(traversal.status, 400)
+})
+
 test('/api/file serve o corpo cru; um arquivo ausente responde 404 com o corpo `não encontrado`', async () => {
   const ok = await get(`/api/file?path=${encodeURIComponent(join(root, 'alpha/map.md'))}`)
   assert.equal(ok.status, 200)
