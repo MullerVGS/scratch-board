@@ -2,6 +2,7 @@
  * Utilidades de DOM, de rede e de copiar. É o que todas as views usam e nenhuma
  * delas deveria reimplementar.
  */
+import { KNOWN } from '../shared/parse.js'
 
 export const api = async (path, opts) => {
   const res = await fetch(path, opts)
@@ -32,9 +33,9 @@ export const svg = (tag, attrs) => {
 }
 
 /**
- * Faz um nó "apertável": clique, Enter e espaço disparam a mesma ação. É o contrato dos
- * cards, dos nós do grafo e das barras do Gantt — tudo que tem `role="button"` sem ser um
- * `<button>` precisa dos três, ou o teclado fica de fora.
+ * Faz um nó "apertável": clique, Enter e espaço disparam a mesma ação. É o contrato dos nomes
+ * da árvore e dos nós do grafo — tudo que tem `role="button"` sem ser um `<button>` precisa
+ * dos três, ou o teclado fica de fora.
  */
 export function pressable(node, fn) {
   node.onclick = fn
@@ -49,6 +50,22 @@ export function pressable(node, fn) {
 
 export const esc = (s) =>
   String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+
+/**
+ * O selo de status — **o único lugar** em que a UI decide como pintar um `Status:`. A árvore
+ * e o grafo o consomem: `KNOWN` decide a cor própria (`.chip[data-s=...]`, em `components.css`);
+ * desconhecido é sempre vermelho com `?` na frente, para que vocabulário novo **apareça** em vez
+ * de sumir num balde de "outros". O servidor já normaliza um status fora do vocabulário como
+ * `?valor` (`normalizeStatus`, `shared/parse.js`); o `?` aqui é redundante com isso de propósito
+ * — o cliente não deveria precisar conhecer essa convenção do servidor para desenhar o selo
+ * certo. O texto vive num `<span>` interno porque `text-overflow` não trunca o próprio contêiner
+ * flex: um desconhecido comprido (`?o-que-o-autor-escreveu`) precisa de caixa de bloco própria
+ * para a reticência funcionar.
+ */
+export function statusChip(status) {
+  const label = KNOWN.includes(status) ? status : status.startsWith('?') ? status : `?${status}`
+  return el(`<span class="chip" data-s="${esc(label)}"><span class="chip-text">${esc(label)}</span></span>`)
+}
 
 export function toast(msg) {
   const t = document.getElementById('toast')
@@ -79,7 +96,7 @@ export async function copy(text, msg) {
  * coisa que um toast no rodapé não diz quando há vários botões na tela.
  *
  * Para o `stopPropagation`: quase todo alvo copiável mora dentro de algo clicável
- * (card que navega, linha que abre a gaveta). Copiar não é navegar.
+ * (a linha da árvore que roteia, um alvo dentro do documento). Copiar não é navegar.
  */
 export function copyBtn(text, what, label = null) {
   const b = el(`

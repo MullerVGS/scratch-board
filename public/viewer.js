@@ -189,16 +189,14 @@ function markGone(doc, ref, live) {
 }
 
 /**
- * Quem de fato rola o documento. O `#pane-right` é a coluna do layout e não a gaveta fixa
- * de antes: quando o conteúdo cabe, quem rola é a página inteira (a moldura cresce com o
- * documento); quando ele estoura a própria caixa (tela estreita, painel com altura travada),
- * quem rola é o painel. Preservar a rolagem "certa" é preservar a de quem realmente rola —
- * senão a troca ao vivo joga o leitor de volta ao topo, que é o pecado que o painel vivo
- * existe para não cometer.
+ * Quem de fato rola o documento: o próprio `#pane-right`. A moldura (`.shell`) tem altura
+ * contida na viewport (`shell.css`), então o painel tem `overflow: auto` e rola **por si** —
+ * a página, por baixo, nunca rola. Guardar e repor o `scrollTop` **deste** elemento é o que
+ * torna a troca ao vivo invisível; preservá-lo é o pecado que o painel vivo existe para não
+ * cometer — jogar o leitor de volta ao topo a cada salvamento do agente.
  */
 function scroller() {
-  const p = open.container
-  return p.scrollHeight > p.clientHeight + 1 ? p : document.scrollingElement || document.documentElement
+  return open.container
 }
 
 /**

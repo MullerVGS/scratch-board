@@ -12,20 +12,10 @@
  *
  * A assinatura é o contrato (tarefa 03): `showFolder(container, ns, node)`.
  */
-import { el, esc, svg, pressable, api } from './dom.js'
+import { el, esc, svg, pressable, api, statusChip } from './dom.js'
 import { graphLayout, edgePath, NODE_W, NODE_H } from './graph-layout.js'
 import { edgeDefs, edgeEl } from './edges.js'
-import { KNOWN, isClosed } from '../shared/parse.js'
-
-/**
- * O selo de status — a mesma regra do `tree.js`: `KNOWN` decide a cor própria
- * (`.chip[data-s=...]`); desconhecido é sempre vermelho com `?` na frente, para que
- * vocabulário novo apareça em vez de sumir num balde de "outros".
- */
-function statusChip(status) {
-  const label = KNOWN.includes(status) ? status : status.startsWith('?') ? status : `?${status}`
-  return el(`<span class="chip" data-s="${esc(label)}"><span class="chip-text">${esc(label)}</span></span>`)
-}
+import { isClosed } from '../shared/parse.js'
 
 /**
  * Um nó: o nome do arquivo, o título quando o `.md` tem um (clampado a duas linhas — é por
@@ -73,8 +63,8 @@ function render(container, ns, node, data) {
 
   const canvas = el(`<div class="graph-canvas" style="width:${width}px; height:${height}px"></div>`)
   const edgesSvg = svg('svg', { class: 'graph-edges', width, height })
-  // Os marcadores e o traço com tooltip são a maquinaria compartilhada com o Gantt — `svg()`
-  // por dentro, porque um `<marker>` montado pelo `el()` some sem erro nenhum.
+  // Os marcadores e o traço com tooltip vêm do `edges.js` — `svg()` por dentro, porque um
+  // `<marker>` montado pelo `el()` some sem erro nenhum.
   edgesSvg.append(edgeDefs('graph'))
 
   let drawn = 0

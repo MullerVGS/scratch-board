@@ -20,8 +20,7 @@
  * triângulo só abre/fecha, e nunca navega. `pressable()` (`dom.js`) dá a cada nome o
  * contrato de clique/Enter/espaço que `role="button"` promete.
  */
-import { el, esc, copyBtn, pressable } from './dom.js'
-import { KNOWN } from '../shared/parse.js'
+import { el, esc, copyBtn, pressable, statusChip } from './dom.js'
 
 /** O que a árvore está mostrando agora — para que os handlers (triângulo, `relabel`) redesenhem sem precisar que `app.js` chame `renderTree` de novo. */
 const state = { container: null, ns: null, board: null, selectedPath: null }
@@ -57,22 +56,6 @@ function relabel() {
   }
 }
 setInterval(relabel, 60_000)
-
-/**
- * O selo de status. `KNOWN` decide a classe — conhecido usa a cor própria do status
- * (`.chip[data-s=...]`, em `components.css`); desconhecido é sempre vermelho com `?` na
- * frente, para que vocabulário novo **apareça** em vez de sumir num balde de "outros". O
- * servidor já normaliza um status fora do vocabulário como `?valor` (`normalizeStatus`,
- * `shared/parse.js`); o `?` aqui é redundante com isso de propósito — o cliente não deveria
- * precisar conhecer essa convenção do servidor para desenhar o selo certo.
- */
-function statusChip(status) {
-  const label = KNOWN.includes(status) ? status : status.startsWith('?') ? status : `?${status}`
-  // O texto vive num `<span>` interno porque `text-overflow` não trunca o próprio
-  // contêiner flex — um vocabulário desconhecido comprido (`?o-que-o-autor-escreveu`)
-  // precisa de uma caixa de bloco própria para a reticência funcionar.
-  return el(`<span class="chip" data-s="${esc(label)}"><span class="chip-text">${esc(label)}</span></span>`)
-}
 
 /** `#/<ns>/<rel>` — a única forma de navegar; `rel` é a chave de rota, nunca o `path` do container. */
 const navigate = (ns, rel) => {

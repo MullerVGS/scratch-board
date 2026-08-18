@@ -2,10 +2,15 @@
    e os dois painéis. Nada aqui sabe o que o painel direito mostra por dentro — isso é
    `tree.css`/`viewer.css`/`markdown.css`/`graph.css`. */
 
+/* A moldura ocupa a viewport e **não cresce além dela**: `height`, não `min-height`. É o que
+   dá aos dois painéis uma altura contida para rolarem **cada um por si** (`#pane-left` e
+   `#pane-right`, com `overflow` próprio abaixo) em vez de a página inteira rolar por baixo de
+   uma coluna e não da outra. O `header` é o primeiro filho da coluna flex e o `.panes` é
+   `flex: 1` — os painéis herdam o que sobra da viewport, e é dentro deles que a rolagem mora. */
 .shell {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 /* ---------- topo ---------- */
@@ -151,9 +156,8 @@ h1 {
 /* ---------- os dois painéis ---------- */
 
 /* Mobile-first: a árvore empilha **acima** do conteúdo, com altura própria e rolagem
-   interna — ela não pode tomar a tela inteira e esconder o painel direito. É a forma
-   estreita da "gaveta" que o alvo pede; a versão com abrir/fechar por toque é da tarefa
-   que desenha a árvore de verdade, que é quem sabe o que faz sentido esconder. */
+   interna — ela não pode tomar a tela inteira e esconder o painel direito. No desktop os
+   dois viram colunas lado a lado (abaixo). */
 .panes {
   display: flex;
   flex-direction: column;
@@ -193,15 +197,6 @@ h1 {
     border-bottom: 0;
     border-right: 1px solid var(--line);
   }
-}
-
-/* O texto de espera dos stubs (`tree.js`/`viewer.js`/`graph.js`, tarefa 03) — some assim
-   que a tarefa que desenha aquele painel de verdade substituir o conteúdo. */
-.stub {
-  padding: var(--gutter);
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 12.5px;
 }
 
 /* ---------- toast ---------- */
