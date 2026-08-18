@@ -5,11 +5,11 @@
  * ele conhece coisas que um renderer genérico não conheceria — o cabeçalho
  * `Chave: valor` do preâmbulo vira metadado estruturado, `Blocked by:` vira link para
  * a issue, caminho de arquivo vira alvo copiável e link relativo vira navegação. É
- * justamente esse conhecimento que faz a gaveta valer mais que um `<pre>`.
+ * justamente esse conhecimento que faz o viewer valer mais que um `<pre>`.
  *
  * O HTML sai como string, com `data-ref` / `data-issue` / `data-open` nos alvos
- * interativos; quem amarra o comportamento é o `app.js`, que tem o board para
- * resolver os refs.
+ * interativos; quem amarra o comportamento é o `viewer.js` (`wireRefs()`), que tem a
+ * árvore da origem para resolver os refs.
  */
 
 // O dialeto é um só, e o parser também: o mesmo módulo que o servidor usa. O
@@ -37,16 +37,16 @@ const esc = (s) =>
 const pathChip = (p) =>
   `<button type="button" class="ref" data-ref="${esc(p)}" title="Copiar caminho">${esc(p)}</button>`
 
-/** Referência a outra issue do mesmo esforço: clicar abre a issue na gaveta. */
+/** Referência a outra issue da mesma pasta: clicar abre a issue no viewer. */
 const issueChip = (n) =>
   `<button type="button" class="issueref" data-issue="${esc(n)}" title="Abrir issue ${esc(n)}">${esc(n)}</button>`
 
 /**
- * Link relativo (`[review-01.md](../review-01.md)`): abre o documento na própria gaveta.
+ * Link relativo (`[review-01.md](../review-01.md)`): abre o documento no próprio viewer.
  *
  * É assim que os documentos de um esforço se citam — o mapa aponta para as issues, a
  * issue aponta para o review. Renderizar só o rótulo jogaria fora o destino, que é a
- * única parte acionável; abrir numa aba nova jogaria fora o contexto. A gaveta navega.
+ * única parte acionável; abrir numa aba nova jogaria fora o contexto. O viewer navega.
  */
 const docLink = (label, href) =>
   `<button type="button" class="doclink" data-open="${esc(href)}" title="Abrir ${esc(href)}">${label}</button>`

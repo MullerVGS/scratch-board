@@ -1,18 +1,20 @@
 /* markdown — o documento renderizado pelo `md.js`: tipografia do corpo, bloco de
    metadados do cabeçalho e os alvos que o renderer cria (doclink, ref, issueref).
 
-   A regra que liga o documento é `#drawer-body.md` — com o id, não só a classe. É o
-   `drawer.css` que deixa `#drawer-body` (0-1-0-0) monoespaçado, e `.md` sozinho
+   A regra que liga o documento é `#pane-right.md` — com o id, não só a classe. É o
+   `viewer.css` que deixa `#pane-right.raw` (0-1-1-0) monoespaçado, e `.md` sozinho
    (0-0-1-0) perderia dele **em qualquer ordem de arquivo**. O id é o que ganha. */
 
 /* ---------- markdown renderizado ---------- */
 
-/* Precisa do id: `#drawer-body` (0-1-0-0) venceria `.md` (0-0-1-0) e o documento
-   inteiro sairia monoespaçado, com os `\n` entre blocos virando linhas em branco.
+/* Precisa do id: `.md` sozinho (0-0-1-0) perderia de `#pane-right.raw` (0-1-1-0), o corpo
+   literal, e o documento inteiro sairia monoespaçado, com os `\n` entre blocos virando
+   linhas em branco. `#pane-right.md` (0-1-1-0) empata em especificidade com o `.raw` — e as
+   duas classes são exclusivas, então nunca coincidem no mesmo elemento.
 
    `--fs-doc` é maior no celular que no desktop — é o único texto da página cujo trabalho
    é ser lido de ponta a ponta, e no telefone isso se faz a um palmo do olho. */
-#drawer-body.md {
+#pane-right.md {
   white-space: normal;
   font-family: var(--sans);
   font-size: var(--fs-doc);
@@ -20,7 +22,8 @@
   color: var(--text);
 }
 
-.md > :first-child {
+/* O primeiro bloco do documento (não a barra do painel, que é o primeiro filho do pane). */
+.md .viewer-doc > :first-child {
   margin-top: 0;
 }
 

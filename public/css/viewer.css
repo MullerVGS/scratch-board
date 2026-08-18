@@ -1,4 +1,97 @@
-/* viewer — o arquivo cru do painel direito (`#pane-right`) quando o alvo é `type:'file'`.
-   Vazio de propósito: o `public/viewer.js` desta tarefa é um stub; a tarefa seguinte
-   desenha o viewer de verdade (texto monoespaçado, ou `.md` via `markdown.css`) e
-   preenche esta folha. O `<link>` já existe no `index.html`, na ordem certa da cascata. */
+/* viewer — o painel direito **fixo** (`#pane-right`) quando o alvo é `type:'file'`: a barra
+   do topo, o corpo literal, o realce da troca ao vivo e o aviso âmbar do sumiço. O que o
+   corpo faz com um `.md` dentro é assunto do `markdown.css`.
+
+   Não é mais gaveta: a largura é a coluna do layout (`shell.css` já dá o `overflow`, o
+   `padding` e a divisão de painéis), então saíram o `#scrim`, a alça de resize e o
+   deslizar. O `#pane-right` já rola e já tem `gutter` — aqui só entram a tipografia do corpo
+   e os estados que o `viewer.js` liga. */
+
+/* A barra do topo: a trilha de volta (`←`) e o caminho copiável. Fica no fluxo, no topo do
+   conteúdo — rola com ele; a volta também está no `Esc`. */
+.viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  /* O corpo pode ser `pre-wrap` (literal); a barra não herda isso. */
+  white-space: normal;
+}
+
+/* O corpo literal — `#pane-right.raw`. Rascunho de agente, log, JSON, binário: texto que só
+   faz sentido byte a byte. Precisa do id para o `.md` (em `markdown.css`) o vencer com o
+   mesmo id — `.md` sozinho (0-0-1-0) perderia de `#pane-right.raw` (0-1-1-0), e o documento
+   inteiro sairia monoespaçado. Os dois são exclusivos (`raw` XOR `md`), então não brigam
+   entre si, e nenhum toca o grafo (que não tem nenhuma das duas classes). */
+#pane-right.raw {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* ---------- a troca ao vivo ---------- */
+
+/* O conteúdo trocou sozinho — o agente salvou o arquivo que você está lendo.
+
+   A rolagem é preservada de propósito (é o ponto todo do painel vivo), e o preço disso é que
+   a troca fica *invisível*: o parágrafo sob os seus olhos continua no mesmo lugar, agora com
+   outro texto. Este realce é a única pista de que ela aconteceu. Curto, e sem deslocar nada —
+   é `background`, não borda: um pixel de borda empurraria o documento inteiro e desmentiria a
+   rolagem que acabamos de preservar. */
+#pane-right.swapped {
+  animation: swapped 1.1s ease-out;
+}
+
+@keyframes swapped {
+  from {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+}
+
+/* ---------- o arquivo sumiu ---------- */
+
+/* Um `ENOENT` cru não é uma frase. E o que já estava na tela **fica**, abaixo do aviso:
+   jogá-lo fora seria punir quem lia pelo que o agente fez. O aviso diz o que o texto virou —
+   a última leitura de um arquivo que não existe mais.
+
+   Numa abertura o corpo está vazio e o aviso vira o próprio estado vazio, na linhagem do
+   `.empty` do `shell.css`. Âmbar, não vermelho: sumir não é erro do board, é um fato do
+   disco — e o board mostra o que o disco diz. */
+.viewer-doc .gone {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  /* O corpo pode estar `pre-wrap`: sem isto, a indentação do template viraria texto. */
+  white-space: normal;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--amber) 10%, var(--bg-soft));
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--line));
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.viewer-doc .gone strong {
+  color: var(--amber);
+  font-weight: 650;
+}
+
+.viewer-doc .gone span {
+  color: var(--faint);
+}
+
+.viewer-doc .gone code {
+  max-width: 100%;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  word-break: break-all;
+}
