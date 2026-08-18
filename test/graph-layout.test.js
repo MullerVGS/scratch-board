@@ -26,18 +26,22 @@ const N = (ids) => ids.map((id) => ({ id, number: id, name: id }))
 const node = (id) => ({ id, number: id, name: id })
 
 describe('camada é o maior caminho; nenhuma aresta anda para trás', () => {
-  test('D depende de B e C (que dependem de A): D cai na camada 2, não na 1', () => {
-    // A→B, A→C, B→D, C→D. Pelo menor caminho D cairia ao lado de B/C — a seta B→D ou C→D
-    // andaria para trás. Pelo maior, D fica depois dos dois.
-    const { at } = graphLayout(N(['A', 'B', 'C', 'D']), [
+  test('C depende de A DIRETO e de B (que depende de A): o maior caminho vence o menor', () => {
+    // C tem dois caminhos até A: direto (A→C, comprimento 1) e via B (A→B→C, comprimento 2).
+    // Um layout por MENOR caminho poria C na camada 1 — ao lado de B, que ele espera — e a
+    // seta B→C andaria para trás. É esse o bug histórico deste projeto (ver AGENTS.md: "esta
+    // linha foi falsa durante todo o tempo em que esteve escrita aqui"), e o diamante
+    // A→B,A→C,B→D,C→D não o pega: os dois caminhos até D têm o mesmo comprimento (2), então
+    // um Math.min passaria por aqui idêntico a um Math.max. Este grafo diverge de propósito.
+    const { at } = graphLayout(N(['A', 'B', 'C']), [
       { from: 'A', to: 'B' },
       { from: 'A', to: 'C' },
-      { from: 'B', to: 'D' },
-      { from: 'C', to: 'D' },
+      { from: 'B', to: 'C' },
     ])
     assert.ok(at(node('A')).x < at(node('B')).x)
-    assert.ok(at(node('B')).x < at(node('D')).x) // D na camada 2, não 1
-    assert.ok(at(node('C')).x < at(node('D')).x)
+    // Se C tivesse ficado na camada 1 (o caminho curto, direto de A), esta linha falharia:
+    // é ela que prova o maior caminho, não só documenta a intenção.
+    assert.ok(at(node('B')).x < at(node('C')).x, 'C fica DEPOIS de B (camada 2, via o caminho longo), não ao lado dele (camada 1, via A direto)')
   })
 
   test('quem não tem aresta chegando é a camada 0 — a frontier', () => {
