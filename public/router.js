@@ -113,8 +113,13 @@ export function connect() {
   source.onmessage = (ev) => {
     const { ns, board, changed } = JSON.parse(ev.data)
     state.boards[ns] = board
-    dispatchEvent(new CustomEvent('board:push', { detail: { ns, board, changed } }))
+    // `route()` primeiro: é ele que resolve `state.active` quando esta é a origem que o
+    // hash está esperando (a de casa, ou uma citada direto na URL de uma carga a frio).
+    // `dispatchEvent` depois, para que quem ouve `board:push` e compara `ns === activeNs()`
+    // (`app.js`) veja o `state.active` já resolvido — na ordem inversa, a própria origem
+    // que acabou de resolver a rota nunca bate a comparação, e a tela nasce em branco.
     route()
+    dispatchEvent(new CustomEvent('board:push', { detail: { ns, board, changed } }))
   }
 
   source.addEventListener('files', (ev) => {

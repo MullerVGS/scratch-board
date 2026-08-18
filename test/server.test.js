@@ -168,6 +168,10 @@ test('/api/board?ns= serve a árvore da origem, com os três vocabulários de ca
   const b = await board()
   assert.equal(b.ns, 'projetos')
   assert.equal(b.root, root)
+  // O `ref` de **topo** é o da origem — nu na de casa —, não o de um nó. É dele que o
+  // cliente monta o nó-raiz sintético (`#/<ns>` sozinho, sem `rel`) sem nunca usar `root`
+  // (o caminho do container) como `ref`.
+  assert.equal(b.ref, '.scratch')
   assert.equal('error' in b, false, 'origem sã não carrega erro')
 
   const alpha = find(b.tree, 'alpha')
@@ -185,6 +189,24 @@ test('/api/board?ns= serve a árvore da origem, com os três vocabulários de ca
   assert.equal(um.status, 'resolved')
   assert.equal(um.title, '01 — Um')
   assert.equal(typeof um.mtime, 'number', 'o nó carrega o mtime — o cliente calcula o "há 2h" com ele')
+})
+
+test('nenhum `ref` — nem o de topo, nem o de um nó — carrega o caminho do container', async () => {
+  // `root`/`path` **devem** carregar o caminho do container (é o vocabulário de leitura,
+  // por contrato) — a garantia é só sobre `ref`, o vocabulário que a UI mostra e copia. O
+  // bug desta rodada era exatamente um `ref` (do nó-raiz sintético, no cliente) recebendo
+  // `board.root`; a defesa do lado do servidor é garantir que o `ref` que ele serve nunca
+  // é, ele mesmo, o caminho do container — em nenhum nível da árvore.
+  const b = await board()
+  assert.equal(b.ref.includes(mounts), false, 'o `ref` de topo (da origem) não pode ser o `root`')
+
+  const walk = (nodes) => {
+    for (const n of nodes) {
+      assert.equal(n.ref.includes(mounts), false, `o \`ref\` de ${n.rel} não pode carregar o container`)
+      if (n.children) walk(n.children)
+    }
+  }
+  walk(b.tree)
 })
 
 test('a árvore sai ordenada por atividade: a pasta com o arquivo mais novo abre a tela', async () => {

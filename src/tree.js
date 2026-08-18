@@ -112,9 +112,11 @@ async function buildLevel(ns, dir) {
 /**
  * A projeção de **uma** origem, lida do disco agora.
  *
- * Devolve `{ ns, root, tree }` — `ns` é o **nome** (o mesmo do envelope SSE), `root` o caminho
- * da origem no container, `tree` os nós ordenados. Não carrega `error`: a origem que deu para
- * ler não está quebrada.
+ * Devolve `{ ns, root, ref, tree }` — `ns` é o **nome** (o mesmo do envelope SSE), `root` o
+ * caminho da origem no container (por onde o board lê, nunca aparece na tela), `ref` o
+ * caminho da origem no vocabulário do workspace (o que o humano copia — a raiz do
+ * breadcrumb, quando o alvo da rota é a própria origem), `tree` os nós ordenados. Não carrega
+ * `error`: a origem que deu para ler não está quebrada.
  *
  * **Root inexistente é árvore vazia, não erro.** Um `.scratch/` que a branch atual não tem
  * (`ENOENT`) é uma origem sem esforço nenhum, e vazio é a verdade — a branch não tem trabalho.
@@ -128,7 +130,7 @@ export async function buildTree(ns) {
   try {
     entries = await visibleEntries(ns.root)
   } catch (err) {
-    if (err.code === 'ENOENT') return { ns: ns.name, root: ns.root, tree: [] }
+    if (err.code === 'ENOENT') return { ns: ns.name, root: ns.root, ref: refIn(ns, ns.root), tree: [] }
     throw err
   }
   const tree = (
@@ -136,7 +138,7 @@ export async function buildTree(ns) {
       entries.map((e) => (e.isDirectory() ? dirNode(ns, ns.root, e.name) : fileNode(ns, ns.root, e.name))),
     )
   ).sort((a, b) => b.mtime - a.mtime)
-  return { ns: ns.name, root: ns.root, tree }
+  return { ns: ns.name, root: ns.root, ref: refIn(ns, ns.root), tree }
 }
 
 /**
@@ -147,4 +149,4 @@ export async function buildTree(ns) {
  * A forma é a mesma de uma árvore de verdade (mesmas chaves, `tree` vazia), então a supressão
  * por hash continua valendo: enquanto o erro for o mesmo, ele não é reempurrado a cada varredura.
  */
-export const errorTree = (ns, error) => ({ ns: ns.name, root: ns.root, error, tree: [] })
+export const errorTree = (ns, error) => ({ ns: ns.name, root: ns.root, ref: refIn(ns, ns.root), error, tree: [] })

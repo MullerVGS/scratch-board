@@ -239,8 +239,11 @@ test('o ref das origens que não são a de casa é qualificado', async () => {
   const vend = { name: 'vend-server', root: t, ref: 'vend-server/.scratch' }
   try {
     await writeFile(join(t, 'map.md'), '# Mapa\n')
-    const { tree } = await buildTree(vend)
+    const { tree, ref } = await buildTree(vend)
     assert.equal(tree[0].ref, 'vend-server/.scratch/map.md')
+    // O `ref` de **topo** é o da origem, não o de um nó — é o que o cliente usa para o
+    // nó-raiz sintético (`#/<ns>` sozinho), para o `path` do container nunca vazar pra UI.
+    assert.equal(ref, 'vend-server/.scratch')
   } finally {
     await rm(t, { recursive: true, force: true })
   }
@@ -257,12 +260,16 @@ test('errorTree devolve a origem quebrada, com a mensagem e a árvore vazia', ()
   const out = errorTree(ns, 'EISDIR: illegal operation on a directory')
   assert.equal(out.ns, 't')
   assert.equal(out.root, root)
+  // O `ref` viaja mesmo na árvore de erro — a aba de uma origem quebrada ainda precisa do
+  // `ref` para o nó-raiz sintético, e a forma tem que casar com a de uma árvore de verdade.
+  assert.equal(out.ref, '.scratch')
   assert.equal(out.error, 'EISDIR: illegal operation on a directory')
   assert.deepEqual(out.tree, [])
 })
 
-test('buildTree devolve `ns` (nome) e `root`, sem carimbo de filesystem no topo', async () => {
-  const { ns: name, root: r } = await buildTree(ns)
+test('buildTree devolve `ns` (nome), `root` e `ref` (o da origem, não de um nó), sem carimbo de filesystem no topo', async () => {
+  const { ns: name, root: r, ref } = await buildTree(ns)
   assert.equal(name, 't', 'o `ns` do topo é o nome, o mesmo do envelope SSE')
   assert.equal(r, root)
+  assert.equal(ref, '.scratch', 'a origem de casa tem `ref` nu')
 })

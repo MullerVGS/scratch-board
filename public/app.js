@@ -30,7 +30,7 @@ function render() {
   if (!board) return
 
   const rel = activeRel()
-  const node = rel ? findNode(board.tree, rel) : { type: 'dir', name: ns, path: board.root, ref: board.root, rel: '' }
+  const node = rel ? findNode(board.tree, rel) : { type: 'dir', name: ns, path: board.root, ref: board.ref, rel: '' }
 
   renderTree(paneLeft, ns, board, node?.path ?? null)
   if (!node) return
