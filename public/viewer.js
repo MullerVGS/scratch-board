@@ -305,8 +305,17 @@ function navTo(node) {
   render(false)
 }
 
-/** Voltar pela trilha. Painel fixo: sem trilha, não há para onde voltar — não faz nada. */
+/**
+ * Voltar pela trilha. Painel fixo: sem trilha, não há para onde voltar — não faz nada.
+ *
+ * O `open.doc` desligado do DOM quer dizer que **o painel não é mais nosso**: uma pasta
+ * (o grafo) foi desenhada em `#pane-right` sem passar pelo `showFile`, e a nossa `trail`
+ * ficou pendurada. Voltar aqui reconstruiria a moldura do viewer por cima da pasta — com o
+ * hash e a seleção da árvore ainda apontando para a pasta. Então a trilha só anda quando o
+ * viewer de fato dona a tela.
+ */
 function goBack() {
+  if (!open?.doc?.isConnected) return
   const prev = trail.pop()
   if (!prev) return
   current = prev
@@ -342,6 +351,9 @@ function installLive() {
   addEventListener('board:push', onPush)
   addEventListener('file:push', onPush)
   addEventListener('keydown', (e) => {
+    // Esc é tecla-reflexo, e o handler é global: só age quando o viewer dona o painel (o
+    // `goBack()` guarda de novo, mas aqui evitamos até o `preventDefault` sobre uma pasta).
+    if (!open?.doc?.isConnected) return
     if (e.key === 'Escape' && trail.length) {
       e.preventDefault()
       goBack()
