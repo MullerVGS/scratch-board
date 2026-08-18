@@ -44,31 +44,12 @@ services:
       # symlink `/root/projetos/tradutor-harness` → `pessoal/tradutor-harness`.
       - ../pessoal/tradutor-harness:/workspace/repos/tradutor-harness:ro
 
-      # Scratchpads de sessão dos agentes. **Não é uma origem**: é rascunho efêmero do
-      # Claude, global, sem watcher e sem push. Read-only, como tudo aqui.
-      - /tmp/claude-0/-root-projetos:/workspace/pads:ro
-
       # Iterar sem rebuild: o servidor não tem build step. Os três são montados como
       # **diretório**, nunca arquivo a arquivo: módulo novo em `src/` passa a valer no
       # container sem ninguém lembrar de somá-lo aqui — que era exatamente o jeito de
       # subir com código velho enquanto os testes passavam no host.
       - ./src:/app/src:ro
       # O parser: um arquivo, dois consumidores — o servidor importa daqui, o browser
-      # o recebe por `/shared/doc.js`.
+      # o recebe por `/shared/parse.js`.
       - ./shared:/app/shared:ro
       - ./public:/app/public:ro
-
-      # ---------- o catálogo ----------
-      #
-      # **O único lugar onde este servidor escreve, e ele é dele.** As origens acima continuam
-      # `:ro`: a garantia de que o board não corrompe os seus tickets é do **mount**, não da
-      # boa intenção — e ela tinha que sobreviver ao dia em que o servidor passou a ter estado.
-      # Sobreviveu: o estado mora aqui, e nenhum `.md` é tocado.
-      #
-      # Perder este volume **degrada, não zera**. O `birthtime`/`ctime` dos diretórios é relido
-      # do disco a cada subida, então as barras-pai do Gantt continuam de pé; o que se perde é
-      # só o que a observação sabia — e ela recomeça sozinha.
-      - scratch-board-history:/workspace/history
-
-volumes:
-  scratch-board-history:

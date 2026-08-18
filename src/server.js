@@ -1,33 +1,34 @@
 // Só HTTP: rotas, estáticos, o stream SSE e a contenção dos caminhos que chegam do cliente.
 //
-// O que o board *é* mora ao lado — `board.js` monta a projeção de uma origem, `pads.js` lê
-// os scratchpads, `cache.js` guarda o board de cada origem e decide se ele mudou,
-// `watch.js` escuta o disco, `paths.js` descobre as origens, `../shared/parse.js` entende o
-// dialeto dos `.md`. Aqui só se responde.
+// O que a árvore *é* mora ao lado — `tree.js` monta a projeção de uma origem, `cache.js`
+// guarda a árvore de cada origem e decide se ela mudou, `watch.js` escuta o disco, `paths.js`
+// descobre as origens, `../shared/parse.js` entende o dialeto dos `.md`. Aqui só se responde.
 //
 // O board **não pergunta mais** ao disco a cada 5 segundos: ele é avisado. O watcher emite,
 // o cache suprime o que não mudou, e o que sobra desce por `/api/stream` para quem estiver
-// olhando — o board inteiro, num evento, calculado num lugar só. Um diff foi rejeitado
+// olhando — a árvore inteira, num evento, calculada num lugar só. Um diff foi rejeitado
 // porque exigiria uma máquina de merge no cliente, que pode divergir do disco: é
 // exatamente o pecado que o board existe para não cometer.
 //
-// **N origens, uma conexão.** Cada namespace tem watcher, hash, digest e board próprios —
+// **N origens, uma conexão.** Cada namespace tem watcher, hash, digest e árvore próprios —
 // mas o browser abre **um** `EventSource`, e cada evento diz de que origem veio (`ns`) e
-// carrega **só o board daquela origem**. Mandar todas as origens em todo evento seria pagar
-// o board do `vend-server` toda vez que alguém escreve no `projetos`; e uma conexão por aba
+// carrega **só a árvore daquela origem**. Mandar todas as origens em todo evento seria pagar
+// a árvore do `vend-server` toda vez que alguém escreve no `projetos`; e uma conexão por aba
 // de origem seria pagar N sockets para assistir a uma tela de cada vez. O `ns` no envelope
 // é o que permite ao cliente atualizar uma origem inativa **sem redesenhar** a ativa.
+//
+// O board é **read-only, e é só leitura mesmo**: não há uma rota que escreva um byte no
+// `.scratch/` nem em lugar nenhum. As origens sobem `:ro` no compose, e o servidor não tem
+// estado próprio — a árvore que ele serve é derivada do disco a cada leitura, e nada mais.
 
 import { createServer } from 'node:http'
-import { readFile, stat } from 'node:fs/promises'
-import { resolve, extname, sep } from 'node:path'
+import { readFile, readdir, stat } from 'node:fs/promises'
+import { resolve, extname, sep, join, relative, dirname, basename } from 'node:path'
 
-import { PADS, REPOS, discover } from './paths.js'
-import { listPads } from './pads.js'
-import { buildBoard } from './board.js'
+import { REPOS, discover, refIn } from './paths.js'
 import { createCache } from './cache.js'
 import { watchTree } from './watch.js'
-import { createHistory } from './history.js'
+import { normalizeStatus, parseBlockedBy, parseDoc, relLinks } from '../shared/parse.js'
 
 const PORT = Number(process.env.PORT ?? 7777)
 const PUBLIC = resolve(import.meta.dirname, '..', 'public')
@@ -36,10 +37,8 @@ const PUBLIC = resolve(import.meta.dirname, '..', 'public')
 // igual nos dois lados: no filesystem, para o Node; na URL, para o browser.
 const SHARED = resolve(import.meta.dirname, '..', 'shared')
 
-/** Um arquivo grande ou binário não vai para a gaveta; só o fato de existir importa. */
+/** Um arquivo grande ou binário não vai para o visualizador; só o fato de existir importa. */
 const TEXT_LIMIT = 512 * 1024
-const JSON_LIMIT = 16 * 1024
-const HOUR = 3600e3
 
 /** Um comentário SSE de tempos em tempos: mantém o socket vivo e denuncia o que morreu. */
 const PING_MS = 30_000
@@ -57,8 +56,7 @@ const PING_MS = 30_000
  *
  * Ela é quase de graça **por causa da supressão**: `sync()` reconstrói, compara o hash e só
  * emite se divergir — e ele só diverge se o watcher tiver perdido alguma coisa. No board
- * parado são ~40 reconstruções por hora por origem (~15ms de CPU cada) e **zero byte no
- * fio, zero re-render**. Contra as 720 reconstruções *com* 720 re-renders do polling.
+ * parado são ~40 reconstruções por hora por origem e **zero byte no fio, zero re-render**.
  *
  * O que ela devolve ao board é a propriedade que o polling tinha de graça: ele não
  * consegue ficar em silêncio mentiroso por mais de 90 segundos.
@@ -72,21 +70,119 @@ const send = (res, code, body, type = 'application/json') => {
   res.end(typeof body === 'string' ? body : JSON.stringify(body))
 }
 
-/** Corpo JSON pequeno das rotas de comando. O limite impede um POST de virar buffer sem teto. */
-async function jsonBody(req) {
-  let body = ''
-  for await (const chunk of req) {
-    body += chunk
-    if (body.length > JSON_LIMIT) throw new Error('corpo grande demais')
+/** A chave de rota `#/<ns>/<rel>` é sempre POSIX, e o `path` do container nunca vai ao hash. */
+const toPosix = (p) => (sep === '/' ? p : p.split(sep).join('/'))
+
+// ---------- o grafo de uma pasta, sob demanda ----------
+//
+// Nem toda pasta é um esforço com issues, então o grafo não é uma coisa só: ele **decide o
+// modo** pelo que a subárvore tem. Se algum `.md` traz `Blocked by:`, o desenho são as arestas
+// de bloqueio (`deps`); senão, são os links markdown que os documentos fazem uns aos outros
+// (`links`). É calculado **sob demanda** — só quando alguém abre a visão de grafo de uma pasta
+// —, nunca no board: a maioria das pastas nunca é aberta assim, e varrer todas a cada leitura
+// seria pagar por uma tela que ninguém pediu.
+
+/** Junta os `.md` da subárvore, do fundo ao topo. Oculto nunca entra — nem `.git/`, nem `.swp`. */
+async function collectMd(dir, out = []) {
+  let entries = []
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return out /* a pasta sumiu, ou nunca existiu: subárvore vazia */
   }
-  return JSON.parse(body || '{}')
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue
+    const path = join(dir, e.name)
+    if (e.isDirectory()) await collectMd(path, out)
+    else if (e.isFile() && extname(e.name) === '.md') out.push(path)
+  }
+  return out
 }
 
-/** Memória tem granularidade de hora. O servidor reafirma o snap — não confia só no mouse. */
-const hourIso = (value) => {
-  const at = Date.parse(value)
-  if (!Number.isFinite(at)) throw new Error('data inválida')
-  return new Date(Math.round(at / HOUR) * HOUR).toISOString()
+/** Um nó do grafo. `id` = `path` (identidade); `rel` = a chave de rota que o cliente navega. */
+function graphNode(ns, doc) {
+  const node = {
+    id: doc.path,
+    name: doc.name,
+    path: doc.path,
+    ref: refIn(ns, doc.path),
+    rel: toPosix(relative(ns.root, doc.path)),
+  }
+  if (doc.title !== undefined) node.title = doc.title
+  if (doc.status !== undefined) node.status = doc.status
+  return node
+}
+
+/**
+ * O modo `deps`: os nós são os arquivos-issue **numerados**, e as arestas são o `Blocked by:`
+ * resolvido **só entre irmãos de mesma pasta-pai** — um `Blocked by: 02` é o `02` da mesma
+ * pasta `issues/`, nunca de outro esforço. `from` = o bloqueante, `to` = o bloqueado, `note` =
+ * a prosa do fragmento (a justificativa que o hover lê antes de decidir furar a fila).
+ *
+ * Um número que não casa com irmão nenhum não vira aresta: não há o que esperar.
+ */
+function depsGraph(ns, docs) {
+  const numbered = docs.filter((d) => d.number !== null)
+  const nodes = numbered.map((d) => graphNode(ns, d))
+  const byKey = new Map(numbered.map((d) => [`${d.dir}\0${d.number}`, d.path]))
+  const edges = []
+  for (const d of numbered) {
+    for (const dep of d.blockedBy) {
+      const from = byKey.get(`${d.dir}\0${dep.number}`)
+      if (!from) continue
+      edges.push(dep.note ? { from, to: d.path, note: dep.note } : { from, to: d.path })
+    }
+  }
+  return { mode: 'deps', nodes, edges }
+}
+
+/**
+ * O modo `links`: os nós são **todos** os `.md` da subárvore, e as arestas são os links
+ * markdown relativos resolvidos **por caminho real** para outro nó da subárvore. `from` = quem
+ * cita, `to` = o citado, e **sem `note`**: um link não carrega justificativa.
+ *
+ * Só o alvo que resolve para um documento que também é nó vira aresta — um link para fora da
+ * subárvore, ou para um arquivo que não existe, não desenha nada.
+ */
+function linksGraph(ns, docs) {
+  const nodes = docs.map((d) => graphNode(ns, d))
+  const present = new Set(docs.map((d) => d.path))
+  const edges = []
+  for (const d of docs) {
+    for (const target of relLinks(d.raw)) {
+      const clean = target.split('#')[0].split('?')[0]
+      if (!clean) continue
+      const to = resolve(d.dir, clean)
+      if (to !== d.path && present.has(to)) edges.push({ from: d.path, to })
+    }
+  }
+  return { mode: 'links', nodes, edges }
+}
+
+/**
+ * O grafo de uma pasta. Lê a subárvore agora (como a árvore, sem cache), parseia cada `.md` e
+ * decide o modo: `deps` se **algum** documento tem `Blocked by:`, `links` caso contrário. Sem
+ * aresta nenhuma, devolve os nós soltos — o cliente mostra a nota em vez de fingir um desenho.
+ */
+async function folderGraph(ns, folder) {
+  const paths = await collectMd(folder)
+  const docs = await Promise.all(
+    paths.map(async (path) => {
+      const raw = await readFile(path, 'utf8')
+      const { header, title } = parseDoc(raw)
+      return {
+        path,
+        dir: dirname(path),
+        name: basename(path),
+        raw,
+        title,
+        status: header.status !== undefined ? normalizeStatus(header.status) : undefined,
+        number: /^(\d+)/.exec(basename(path))?.[1]?.padStart(2, '0') ?? null,
+        blockedBy: parseBlockedBy(header['blocked by']),
+      }
+    }),
+  )
+  return docs.some((d) => d.blockedBy.length > 0) ? depsGraph(ns, docs) : linksGraph(ns, docs)
 }
 
 /**
@@ -111,25 +207,12 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
   /** Quem está com o board aberto. Um `res` de SSE que nunca termina — **um por aba**, não por origem. */
   const clients = new Set()
 
-  // O catálogo é **um**, e a origem vive na chave de cada linha. Ele não é por namespace
-  // como o cache: o cache existe para uma origem não suprimir a outra, e isso é uma
-  // propriedade do *push*. O catálogo só registra fatos, e fato de origem diferente não
-  // interfere em fato de origem nenhuma.
-  //
-  // Nasce **antes** dos wires porque cada cache o recebe: o `buildBoard()` lê o catálogo para
-  // destilar a barra do Gantt de cada issue. É leitura pura — quem escreve no catálogo é o
-  // `sync()`, depois que o board foi lido.
-  const history = await createHistory()
-
   /**
-   * Uma origem, e tudo que é dela: o board, a supressão, o digest, o watcher — e o **inode**
+   * Uma origem, e tudo que é dela: a árvore, a supressão, o digest, o watcher — e o **inode**
    * em que esse watcher foi aberto, que é como o `rearm()` sabe que ele ficou para trás.
    */
   const wires = new Map(
-    namespaces.map((ns) => [
-      ns.name,
-      { ns, cache: createCache(ns, history), unwatch: null, watching: undefined },
-    ]),
+    namespaces.map((ns) => [ns.name, { ns, cache: createCache(ns), unwatch: null, watching: undefined }]),
   )
 
   /**
@@ -143,11 +226,9 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
    * (Node 22) depois de um checkout real: board correto, push mudo para sempre.
    *
    * **É heurística, e a rede está embaixo.** O sinal é a troca do número do inode, e ele pode
-   * mentir: o ext4 **reusa** o número quando a recriação é imediata (medido — mesmo `ino` dos
-   * dois lados de um `rm`+`mkdir` colado). No `git checkout` de verdade ele trocou
-   * (34604854 → 34831673), que é o caso que motivou isto; quando não trocar, o rearme não
-   * dispara e o board volta a depender da varredura de 90s — degradado, **nunca mentindo**.
-   * O conserto sem heurística é o watch por diretório que o `watch.js` já aponta.
+   * mentir: o ext4 **reusa** o número quando a recriação é imediata. No `git checkout` de
+   * verdade ele trocou, que é o caso que motivou isto; quando não trocar, o rearme não dispara
+   * e o board volta a depender da varredura de 90s — degradado, **nunca mentindo**.
    *
    * **Não ressuscita o que foi morto de propósito**: o `stopWatch()` não move o inode, então
    * `watching` continua batendo e nada acontece — é o que mantém o `sweep.test.js` honesto.
@@ -163,10 +244,11 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
     })
   }
 
-  // Os roots que o board pode ler. É o `safePath()` de sempre, agora generalizado às
-  // origens descobertas — **e é só isso**: nenhuma política nova de `realpath`, nenhum
-  // endurecimento novo de symlink. O que mudou foi a lista, não o modelo.
-  const roots = [...namespaces.map((ns) => ns.root), PADS]
+  // Os roots que o board pode ler. É o `safePath()` de sempre, generalizado às origens
+  // descobertas — **e é só isso**: nenhuma política nova de `realpath`, nenhum endurecimento
+  // novo de symlink. O que mudou foi a lista, não o modelo. O diretório comum **não** é um
+  // root: ele contém as origens, mas não é uma delas.
+  const roots = namespaces.map((ns) => ns.root)
 
   /** Prende um `path` vindo do cliente aos roots que o board pode ler. */
   const safePath = (input) => {
@@ -177,30 +259,26 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
   }
 
   // ---------- o push ----------
-
-  // O board já está serializado; reparsear para reserializar dentro de um envelope seria
-  // pagar 62 KB de JSON duas vezes por evento. O envelope é montado como texto.
   //
-  // `ns` diz **de que origem** o evento fala: sem ele o cliente não teria como guardar o
-  // board novo no lugar certo, e um push do `vend-server` sobrescreveria o `projetos`.
+  // A árvore já está serializada; reparsear para reserializar dentro de um envelope seria pagar
+  // o JSON duas vezes por evento. O envelope é montado como texto.
   //
-  // `changed` é a lista de caminhos que mexeram no disco (vazia no snapshot de conexão). O
-  // board não precisa dela — ele vem inteiro —, mas a gaveta precisa: é assim que ela
+  // `ns` diz **de que origem** o evento fala: sem ele o cliente não teria como guardar a árvore
+  // nova no lugar certo, e um push do `vend-server` sobrescreveria o `projetos`.
+  //
+  // `changed` é a lista de caminhos que mexeram no disco (vazia no snapshot de conexão). A
+  // árvore não precisa dela — ela vem inteira —, mas o visualizador precisa: é assim que ele
   // descobre que o documento aberto é justamente o que o agente acabou de escrever.
   const frame = (ns, json, changed) =>
     `data: {"ns":${JSON.stringify(ns)},"changed":${JSON.stringify(changed)},"board":${json}}\n\n`
 
   /**
-   * O evento do **arquivo**, não do board: só os caminhos, sem os 62 KB da projeção.
+   * O evento do **arquivo**, não da árvore: só os caminhos, sem a projeção inteira.
    *
-   * O board projeta `Status:`, título e `Blocked by:` — e **nada do corpo**. Um agente
-   * escrevendo a `## Answer` do documento que você tem aberto na gaveta não move um pixel do
-   * board, e sob a supressão por hash isso seria **silêncio** — justamente no caso de uso que
-   * dá nome à gaveta viva: *o agente está escrevendo o que você está lendo*.
-   *
-   * A supressão do board continua certa (ele não mudou, não se redesenha). O que não pode
-   * acontecer é o sinal "*o arquivo* mudou" ficar pendurado no sinal "*o board* mudou": são
-   * dois escopos, e colapsá-los cega a gaveta.
+   * A árvore projeta estrutura, status e título — e **nada do corpo**. Um agente escrevendo a
+   * `## Answer` do documento que você tem aberto não move um pixel da árvore, e sob a supressão
+   * por hash isso seria **silêncio** — justamente no caso de uso que dá nome ao visualizador
+   * vivo: *o agente está escrevendo o que você está lendo*.
    */
   const fileFrame = (ns, changed) =>
     `event: files\ndata: {"ns":${JSON.stringify(ns)},"changed":${JSON.stringify(changed)}}\n\n`
@@ -210,80 +288,36 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
   }
 
   /**
-   * Relê o disco de **uma origem** e empurra — o board **se, e só se, ele mudou**; os
-   * caminhos, se algum arquivo mudou e o board não.
+   * Relê o disco de **uma origem** e empurra — a árvore **se, e só se, ela mudou**; os
+   * caminhos, se algum arquivo mudou e a árvore não.
    *
    * É o único caminho que emite. Serve o watcher, a varredura e o `/api/board`: uma releitura
    * por HTTP que descobre uma mudança também avisa as outras abas, em vez de guardar a
    * novidade para si e deixar o hash mentir para o resto do mundo.
    *
-   * Duas supressões, independentes de propósito: o `refresh()` diz se o **board** mudou — é
+   * Duas supressões, independentes de propósito: o `refresh()` diz se a **árvore** mudou — é
    * ele que autoriza redesenhar a tela; o `movedFiles()` diz quais **arquivos** mudaram de
    * conteúdo — é ele que autoriza avisar quem está lendo um deles. **Colapsar as duas numa só
-   * cega a gaveta**: o board não projeta uma linha do corpo dos arquivos, então o corpo que o
-   * agente escreve não move o hash, e ninguém seria avisado.
+   * cega o visualizador**: a árvore não projeta uma linha do corpo dos arquivos, então o corpo
+   * que o agente escreve não move o hash, e ninguém seria avisado.
    *
    * As duas são **por origem**, e é o que impede uma escrita numa de suprimir ou acordar a
    * outra. Não há supressão cruzada: cada namespace tem o seu hash e o seu digest.
    *
+   * O watcher se reconcilia **aqui** (`rearm`), pela mesma razão: este é o único ponto por
+   * onde toda leitura de disco passa — o gatilho, a varredura de 90s e o `/api/board`.
+   * Pendurá-lo no watcher o deixaria cego justamente quando o watcher cala, que é o buraco
+   * que ele existe para tapar. **Sem relógio próprio**: um `setInterval` só para statar roots
+   * seria polling voltando pela porta dos fundos.
+   *
    * **Ocioso continua custando zero.** Nada aqui roda por relógio: o `sync()` só acontece
    * quando o watcher fala, quando a varredura de 90s passa ou quando alguém pede o board.
-   * Disco parado ⇒ board igual, digests iguais ⇒ **0 evento, 0 byte**.
+   * Disco parado ⇒ árvore igual, digests iguais ⇒ **0 evento, 0 byte**.
    */
   async function sync(name) {
     const { cache } = wires.get(name)
-    const [{ json, changed: moved, board }, changed] = await Promise.all([cache.refresh(), cache.movedFiles()])
+    const [{ json, changed: moved }, changed] = await Promise.all([cache.refresh(), cache.movedFiles()])
 
-    // O catálogo observa **aqui**, e não no watcher: este é o único ponto do servidor por
-    // onde toda leitura de disco passa — o gatilho do watcher, a varredura de 90s e o
-    // `/api/board`. Pendurá-lo no watcher o deixaria cego justamente quando o watcher morre,
-    // que é o buraco que a varredura existe para tapar.
-    //
-    // Ele **não empurra nada**: um evento no catálogo não é um evento no fio. O board só sai
-    // daqui se o hash dele mudou, exatamente como antes.
-    //
-    // **Os arquivados entram junto**, e essa linha é a razão de o `buildBoard()` devolver as
-    // duas listas separadas: esforço arquivado é esforço **terminado** — exatamente aquele
-    // cuja duração o Gantt existe para mostrar. Observar só os ativos apagaria do catálogo a
-    // única história completa que existe.
-    //
-    // O catálogo é **best-effort**: ele espia a leitura do board, não é dono dela. `observe()`
-    // escreve em disco (o log, o batimento), e essa escrita pode falhar por um motivo que não
-    // tem nada a ver com o board que acabou de ser lido com sucesso — disco cheio, volume
-    // remontado `ro`, o log virando diretório por baixo dele. Deixar isso subir derrubaria a
-    // leitura por causa da escrita de um espectador, e no `/api/stream` (onde os headers já
-    // saíram) isso não vira um 500: vira `ERR_HTTP_HEADERS_SENT` não capturado, e o processo
-    // inteiro morre — todas as origens, para todos os clientes. Contido aqui, do jeito que o
-    // watcher e a varredura já contêm a falha do próprio `sync()`.
-    //
-    // Mas silêncio total também não serve — é a doutrina deste projeto (ver **A rede de
-    // segurança**, no AGENTS.md): um catálogo que para de gravar sem avisar é exatamente o
-    // modo de falha que o push inteiro existe para não ter. Por isso o erro vai para o log do
-    // container, mesmo sem subir.
-    //
-    // **A observação vem depois da leitura, e por isso a faixa nova do Gantt chega um ciclo
-    // depois.** O `refresh()` acima já leu o board com o catálogo **de antes** desta
-    // observação; a coluna (o chip do card, o kanban) muda na hora, porque vem do `Status:` do
-    // arquivo, mas a *faixa* correspondente na barra do Gantt só aparece no próximo `sync()` —
-    // a próxima escrita, ou a varredura de 90s. É um atraso de retaguarda numa tela
-    // retrospectiva, não um push fantasma: a faixa nova é uma mudança de board de verdade, e
-    // ela só existe porque uma transição de verdade aconteceu.
-    try {
-      await history.observe(name, [...board.efforts, ...board.archived], Date.now())
-    } catch (err) {
-      console.error(`catálogo: falha ao observar ${name}: ${err.message}`)
-    }
-
-    // E o watcher se reconcilia **aqui**, pela mesma razão que o catálogo observa aqui: este é
-    // o único ponto por onde toda leitura de disco passa — o gatilho do watcher, a varredura de
-    // 90s e o `/api/board`. Pendurá-lo no watcher o deixaria cego justamente quando o watcher
-    // cala, que é o buraco que ele existe para tapar.
-    //
-    // **Sem relógio próprio, de propósito.** A varredura já é a rede contra o silêncio e o botão
-    // de reler já é a válvula humana; os dois passam por aqui. Um `setInterval` só para statar
-    // roots seria polling voltando pela porta dos fundos, e num board parado custaria
-    // exatamente o que a supressão comprou. **Ocioso continua custando zero**: um `stat` por
-    // `sync()`, e `sync()` não roda por relógio.
     try {
       await rearm(name)
     } catch (err) {
@@ -295,58 +329,26 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
     return json
   }
 
-  /**
-   * Todas as origens, num payload só — o primeiro board da aba e o que o botão de reler
-   * chama. Cada origem passa pelo seu `sync()`, então a releitura é de verdade (e o que ela
-   * descobrir também é empurrado às outras abas).
-   *
-   * O JSON de cada board já está pronto: montá-los como texto evita reparsear 62 KB por
-   * origem só para reserializá-los dentro do envelope.
-   */
-  async function syncAll() {
-    const boards = await Promise.all(
-      namespaces.map(async (ns) => `${JSON.stringify(ns.name)}:${await sync(ns.name)}`),
-    )
-    const names = JSON.stringify(namespaces.map((ns) => ns.name))
-    return `{"namespaces":${names},"boards":{${boards.join(',')}}}`
-  }
-
   // ---------- as rotas ----------
 
   async function handler(req, res) {
     const url = new URL(req.url, 'http://localhost')
     try {
-      if (url.pathname === '/api/board') return send(res, 200, await syncAll())
-
-      if (url.pathname === '/api/confirm' && req.method === 'POST') {
-        const { ns, slug, number, start, end } = await jsonBody(req)
-        if (typeof ns !== 'string' || typeof slug !== 'string' || !ns || !slug) {
-          throw new Error('origem e esforço são obrigatórios')
-        }
-        if (number !== undefined && (typeof number !== 'string' || !number)) {
-          throw new Error('número inválido')
-        }
-        const wire = wires.get(ns)
+      // A projeção de **uma** origem, relida do disco por dentro do `sync()` (que também avisa
+      // as outras abas se descobrir novidade). É o que o botão de reler chama.
+      if (url.pathname === '/api/board') {
+        const wire = wires.get(url.searchParams.get('ns') ?? '')
         if (!wire) throw new Error('origem não encontrada')
+        return send(res, 200, await sync(wire.ns.name))
+      }
 
-        // A rota só confirma o que a projeção conhece. Isso também distingue issue de esforço
-        // sem aceitar caminho do cliente — a identidade é namespace + slug + número.
-        const current = await buildBoard(wire.ns, history)
-        const effort = [...current.efforts, ...current.archived].find((item) => item.slug === slug)
-        if (!effort) throw new Error('esforço não encontrado')
-        if (number !== undefined && !effort.issues.some((issue) => issue.number === number)) {
-          throw new Error('issue não encontrada')
-        }
-
-        const snappedStart = hourIso(start)
-        const snappedEnd = hourIso(end)
-        if (Date.parse(snappedStart) > Date.parse(snappedEnd)) throw new Error('intervalo invertido')
-        const confirmation = await history.confirm(ns, slug, number, snappedStart, snappedEnd, Date.now())
-
-        // O catálogo vive fora do `.scratch/`, então watcher nenhum acordará. A própria rota
-        // sincroniza e empurra a projeção nova às abas; o POST não deixa a confirmação muda.
-        await sync(ns)
-        return send(res, 200, { confirmation })
+      // O grafo de uma pasta, calculado sob demanda. `ns` escolhe a origem (para o `ref`/`rel`);
+      // `path` é a pasta no vocabulário do container, presa aos roots pelo `safePath()`.
+      if (url.pathname === '/api/graph') {
+        const wire = wires.get(url.searchParams.get('ns') ?? '')
+        if (!wire) throw new Error('origem não encontrada')
+        const folder = safePath(url.searchParams.get('path') ?? '')
+        return send(res, 200, await folderGraph(wire.ns, folder))
       }
 
       if (url.pathname === '/api/stream') {
@@ -360,13 +362,10 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
         // um frame por namespace. A aba volta com todas as origens frescas, e não só a que
         // está na tela: quem reconecta não sabe quanto tempo ficou fora.
         //
-        // E ele **relê o disco** (`sync()`), em vez de servir o que o cache acredita. A
-        // diferença aparece justamente na hora em que ela importa: se a aba está
-        // reconectando, alguma coisa esteve quebrada — e se o que quebrou foi o watcher, o
-        // cache está velho. Servir o cache aqui seria devolver a mentira que a reconexão
-        // veio consertar. Custa uma reconstrução por origem por conexão aberta, e conexão
-        // se abre pouco. (Como todo `sync()`, se a releitura descobrir novidade, as outras
-        // abas são avisadas — a descoberta não fica presa em quem conectou.)
+        // E ele **relê o disco** (`sync()`), em vez de servir o que o cache acredita. Se a
+        // aba está reconectando, alguma coisa esteve quebrada — e se o que quebrou foi o
+        // watcher, o cache está velho. Servir o cache aqui seria devolver a mentira que a
+        // reconexão veio consertar.
         res.write(`retry: 2000\n\n`)
         for (const ns of namespaces) res.write(frame(ns.name, await sync(ns.name), []))
         clients.add(res)
@@ -380,25 +379,24 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
         return
       }
 
-      // Os scratchpads são **globais**: eles não pertencem a origem nenhuma. São o rascunho
-      // efêmero do Claude, e continuam sob demanda — sem watcher, sem push.
-      if (url.pathname === '/api/pads') return send(res, 200, { root: PADS, pads: await listPads() })
-
       if (url.pathname === '/api/file') {
         // O caminho é absoluto e único no container, então ele **já diz** de que origem é:
-        // o `safePath()` o prende aos roots descobertos, e não há um `ns` a passar aqui.
+        // o `safePath()` o prende aos roots descobertos, e não há um `ns` a passar aqui. O
+        // corpo é **cru** (texto), não um envelope — o visualizador o exibe direto.
         const path = safePath(url.searchParams.get('path') ?? '')
-        const { size } = await stat(path)
-        if (size > TEXT_LIMIT) {
-          return send(res, 200, { path, content: `— arquivo de ${size} bytes, grande demais para exibir —` })
+        let size
+        try {
+          ;({ size } = await stat(path))
+        } catch {
+          // Sumir é um **estado**, não um erro do board: o visualizador o trata como âmbar e o
+          // diz por cima do texto que estava lendo. A string é contrato — o cliente a procura.
+          return send(res, 404, 'não encontrado', 'text/plain')
         }
+        if (size > TEXT_LIMIT) return send(res, 413, `— arquivo de ${size} bytes, grande demais para exibir —`, 'text/plain')
         const buf = await readFile(path)
-        // NUL nos primeiros bytes é o sinal barato de binário: evita despejar um PNG na gaveta.
+        // NUL nos primeiros bytes é o sinal barato de binário: evita despejar um PNG na tela.
         const binary = buf.subarray(0, 8000).includes(0)
-        return send(res, 200, {
-          path,
-          content: binary ? `— binário, ${size} bytes —` : buf.toString('utf8'),
-        })
+        return send(res, 200, binary ? `— binário, ${size} bytes —` : buf.toString('utf8'), 'text/plain')
       }
 
       // Estático de dois roots: `public/` na raiz da URL, e `shared/` sob `/shared/` — é
@@ -415,54 +413,24 @@ export async function start(port = PORT, { sweep = SWEEP_MS } = {}) {
     }
   }
 
-  // O disco de agora não é novidade: o servidor nasce sabendo o que está em cada origem.
+  // O disco de agora não é novidade: o servidor nasce sabendo o que está em cada origem. Sem
+  // isso, a primeira rajada acharia que **todo** arquivo acabou de mudar e empurraria a lista
+  // inteira de caminhos.
   await Promise.all([...wires.values()].map((w) => w.cache.seed()))
-
-  // **E o catálogo também é semeado**, pelo mesmo motivo com outra roupa. O `held` de cada
-  // issue (`"em <coluna> há N"`) nasce do primeiro `seen` que o servidor grava; se esse `seen`
-  // só fosse escrito no primeiro `sync()` (a conexão, a varredura), o campo saltaria de vazio
-  // para o instante observado num board **parado** — um push fantasma que a varredura de
-  // segurança proíbe (ver `sweep.test.js`). Registrando o `seen` de tudo que já está no disco
-  // **antes de servir**, o `held` nasce estável.
-  //
-  // Idempotente no restart: `createHistory()` releu o log, e `observe()` só grava o que é novo —
-  // um ticket que já tinha `seen` persistido não ganha outro, então o piso segue crescendo desde
-  // a primeira observação da vida, sobrevivendo aos restarts. Best-effort, como todo `observe()`.
-  const seededAt = Date.now()
-  await Promise.all(
-    namespaces.map(async (ns) => {
-      try {
-        const board = await buildBoard(ns, history)
-        await history.observe(ns.name, [...board.efforts, ...board.archived], seededAt)
-      } catch (err) {
-        console.error(`catálogo: falha ao semear ${ns.name}: ${err.message}`)
-      }
-    }),
-  )
 
   const server = createServer(handler)
 
   // Um watcher **por origem**. O `fs.watch` recursivo do Node vigia uma árvore, e as árvores
-  // são mounts distintos — um watcher só no diretório comum atravessaria os bind mounts no
-  // papel, mas ficaria com uma lista de caminhos misturada e um único ponto de morte para
-  // todas as origens. Separados, um watcher que cai leva só a sua origem para a varredura.
-  //
-  // Ele é **gatilho**, não testemunha — a lista de caminhos que ele entrega fica onde está, e
-  // o `sync()` apura por conta própria o que mudou. O `fs.watch` recursivo do Node para de
-  // reportar um nome depois que um `rename` troca o inode por baixo dele, e é assim que os
-  // agentes escrevem (tmp + rename): da segunda edição em diante, o arquivo de verdade some
-  // do relato do kernel. Ele basta para dizer *que* algo mexeu; quem diz *o quê* é o digest.
+  // são mounts distintos — separados, um watcher que cai leva só a sua origem para a varredura.
   //
   // A montagem inicial é o **mesmo** `rearm()` que o `sync()` chama depois: na subida o
   // `watching` está `undefined`, e nenhum inode é igual a isso, então o primeiro rearme sempre
-  // abre o watch. Um caminho só para abrir watcher — um `watchTree()` à parte aqui nasceria
-  // sem registrar o inode, e o primeiro `sync()` fecharia e reabriria o que a subida acabou
-  // de abrir.
+  // abre o watch.
   await Promise.all([...wires.keys()].map((name) => rearm(name)))
 
   // A varredura não empurra só o board: como o `changed` sai do digest e não do watcher, ela
-  // também sabe **quais** arquivos mudaram — então, com o watcher morto, a gaveta aberta se
-  // cura junto com o board.
+  // também sabe **quais** arquivos mudaram — então, com o watcher morto, o visualizador aberto
+  // se cura junto com o board.
   const sweeper = setInterval(() => {
     for (const name of wires.keys()) {
       sync(name).catch(() => { /* a próxima volta repesca — a varredura não desiste */ })

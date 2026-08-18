@@ -29,8 +29,8 @@
 // `.scratch/...` (o caminho é relativo a ela mesma) e qualquer outra produz
 // `<nome>/.scratch/...`. O caminho interno do container nunca é apresentado.
 //
-// Vive num módulo só porque `board.js`, `pads.js` e `server.js` precisam disto: se a
-// tradução morasse no `server.js`, os dois primeiros o importariam de volta — ciclo.
+// Vive num módulo só porque `tree.js` e `server.js` precisam disto: se a tradução morasse no
+// `server.js`, o `tree.js` o importaria de volta — ciclo.
 
 import { readdir } from 'node:fs/promises'
 import { join, resolve, relative, sep } from 'node:path'
@@ -46,18 +46,12 @@ import { join, resolve, relative, sep } from 'node:path'
  */
 export const REPOS = resolve(process.env.REPOS_DIR ?? '/workspace/repos')
 
-// Os scratchpads de sessão dos agentes. Root à parte, e **fora dos namespaces**: eles são
-// rascunho efêmero do Claude, não tracker de repositório nenhum. Read-only, como tudo aqui.
-export const PADS = resolve(process.env.PADS_DIR ?? '/workspace/pads')
-
 /**
  * A origem de casa: o workspace de onde os comandos partem. É a primeira aba, e a única
  * cujo `ref` é nu — `.scratch/...`, não `projetos/.scratch/...`, porque colar o segundo
  * num agente que já roda em `/root/projetos` não leva a lugar nenhum.
  */
 const HOME = process.env.HOME_NS ?? 'projetos'
-
-const PADS_REF = process.env.PADS_REF ?? '/tmp/claude-0/-root-projetos'
 
 /** O caminho `path`, dito no vocabulário de `ref` — ou `null` se ele não mora sob `root`. */
 const under = (root, ref, path) => {
@@ -66,7 +60,6 @@ const under = (root, ref, path) => {
   return rest ? `${ref}/${rest}` : ref
 }
 
-export const padRef = (path) => under(PADS, PADS_REF, path) ?? path
 export const refIn = (ns, path) => under(ns.root, ns.ref, path) ?? path
 
 /**
