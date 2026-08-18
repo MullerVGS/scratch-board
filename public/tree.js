@@ -205,6 +205,13 @@ function ensureVisible(nodes, selectedPath) {
  * pelo clique no triângulo, que não recebe board novo nenhum e precisa só re-mostrar a mesma
  * árvore com um `path` a mais ou a menos em `expanded`.
  *
+ * **Não chama `ensureVisible` aqui.** Essa garantia é de `renderTree()`, quando uma seleção
+ * *nova* chega — rodá-la a cada `redraw()` reabriria, no mesmo instante, a pasta que o
+ * clique no triângulo acabou de fechar: `selectedPath` não muda num toggle manual, então
+ * `ensureVisible` a reencontraria como ancestral da seleção e a devolveria a `expanded` antes
+ * do próximo frame — o colapso nunca chegaria a se ver. `renderTree()` é o único ponto que
+ * sabe distinguir "a seleção mudou" de "só o `Set` mudou".
+ *
  * A rolagem é salva **antes** de `replaceChildren` e restaurada **depois**: sem isso, toda
  * vez que a árvore reordena (um save legítimo) ou uma pasta abre, `#pane-left` voltaria ao
  * topo — a mesma armadilha que a gaveta antiga já pagou uma vez com o `scrollTop` do corpo.
@@ -221,7 +228,6 @@ function redraw() {
   } else if (!board.tree.length) {
     container.replaceChildren(el('<div class="empty">sem arquivos</div>'))
   } else {
-    ensureVisible(board.tree, selectedPath)
     const tree = el('<div class="tree"></div>')
     tree.append(...board.tree.map((n) => nodeEl(n, 0, ns, selectedPath)))
     container.replaceChildren(tree)
@@ -235,5 +241,6 @@ export function renderTree(container, ns, board, selectedPath) {
   state.ns = ns
   state.board = board
   state.selectedPath = selectedPath
+  if (board.tree?.length) ensureVisible(board.tree, selectedPath)
   redraw()
 }
