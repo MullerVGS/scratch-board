@@ -43,12 +43,12 @@ function depsFromEdges(byId, edges) {
 }
 
 /**
- * Um Gantt gasta o eixo X com tempo; este grafo gasta com **profundidade**.
+ * O eixo X do grafo é **profundidade**, não tempo.
  *
  * O `.scratch/` não tem data de início nem duração, e inventá-las à mão em cada `.md`
  * seria criar um estado que ninguém mantém — datas podres mentem com mais confiança
- * que a ausência delas. Mas as setas de um Gantt não precisam de tempo: elas são as
- * arestas do `Blocked by:` (ou do link relativo), e essas existem. Trocado o eixo, a
+ * que a ausência delas. Mas as setas não precisam de tempo: elas são as arestas do
+ * `Blocked by:` (ou do link relativo), e essas existem. Com o eixo em profundidade, a
  * camada 0 passa a ser a frontier — o que dá para atacar agora — e cada coluna à
  * direita é o que aquilo destrava.
  *

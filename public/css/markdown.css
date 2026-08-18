@@ -142,7 +142,7 @@
   word-break: break-word;
 }
 
-/* O bloco de código rola dentro de si — a gaveta nunca rola na horizontal. */
+/* O bloco de código rola dentro de si — o viewer nunca rola na horizontal. */
 .md pre {
   margin: 0 0 14px;
   padding: 12px 14px;
@@ -294,7 +294,7 @@
   content: " ✓";
 }
 
-/* Referência de issue (`Blocked by:`): clicar abre a issue na própria gaveta. */
+/* Referência de issue (`Blocked by:`): clicar abre a issue no próprio viewer. */
 .issueref {
   font-family: var(--mono);
   font-size: 12px;

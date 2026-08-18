@@ -1,13 +1,10 @@
 /**
- * A maquinaria de setas que o grafo e o Gantt compartilham: os `<marker>` e o traço com a
- * prosa do `Blocked by:` no tooltip.
- *
- * Ela existia uma vez no `graph.js` e ia nascer copiada no `gantt.js` — e cópia que
- * diverge é a história que o parser já contou (ver **O parser existe uma vez** no
- * `AGENTS.md`). Tudo aqui é `svg()`, nunca `el()`: um `<marker>` montado como HTML nasce
- * fora do namespace SVG e o navegador o aceita e **ignora** — as setas somem sem erro
- * nenhum. O prefixo dos ids separa os desenhos: duas visões nunca estão na tela ao mesmo
- * tempo, mas ids duplicados num DOM são um convite a depurar o navegador.
+ * A maquinaria de setas do grafo: os `<marker>` e o traço com a prosa do `Blocked by:` no
+ * tooltip. Vive à parte para existir **uma vez** — cópia que diverge é dívida, como o parser
+ * já ensinou. Tudo aqui é `svg()`, nunca `el()`: um `<marker>` montado como HTML nasce fora do
+ * namespace SVG e o navegador o aceita e **ignora** — as setas somem sem erro nenhum. O
+ * `prefix` dos ids mantém os marcadores num escopo próprio, longe de qualquer outro `<defs>`
+ * que um dia divida o DOM.
  */
 import { svg } from './dom.js'
 

@@ -43,10 +43,6 @@
   content: "✓";
 }
 
-:where(.stub, nav):hover .copy {
-  opacity: 0.7;
-}
-
 .copy:hover {
   opacity: 1;
   color: var(--accent);
@@ -92,9 +88,9 @@
 
 /* ---------- botão de ícone ----------
 
-   O botão-ícone genérico: alvo de toque quadrado, sem borda, sem fundo até o hover.
-   Nasceu na gaveta antiga (`drawer.css`, morta nesta tarefa); o botão de reler já era o
-   único outro consumidor, então ele mora aqui agora — mover, não duplicar. */
+   O botão-ícone genérico: alvo de toque quadrado, sem borda, sem fundo até o hover. Hoje
+   os consumidores são o botão de reler (no cabeçalho) e o `←` de voltar do viewer — por
+   reaparecer em mais de uma tela, mora aqui, não na folha de um painel só. */
 
 button.icon {
   flex: none;

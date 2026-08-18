@@ -134,7 +134,7 @@ export function summarize(raw) {
  *
  * Cada fragmento carrega o `number` canônico de dois dígitos (é ele que resolve a
  * aresta, porque os arquivos são numerados a partir de `01`), o `label` como o autor
- * escreveu (é ele que a gaveta mostra), a `note` e o fragmento cru.
+ * escreveu (é ele que o viewer mostra), a `note` e o fragmento cru.
  *
  * Fragmento sem número que o abra (`(nada — pode começar já)`) vem com `number: null`:
  * ele não referencia issue nenhuma, mas continua sendo prosa a ser lida — o servidor o
@@ -157,7 +157,7 @@ export const splitBlockedBy = (value) =>
  *
  * O `label` fica de fora de propósito: isto é o que o `/api/board` serializa, e é
  * contrato — o número canônico resolve a aresta, e como o autor o escreveu só interessa
- * a quem *mostra* o fragmento (a gaveta), não a quem o resolve.
+ * a quem *mostra* o fragmento (o viewer), não a quem o resolve.
  */
 export const parseBlockedBy = (value) =>
   splitBlockedBy(value)

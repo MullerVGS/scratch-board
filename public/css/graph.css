@@ -1,36 +1,6 @@
-/* graph — a terceira visão: o alternador, o contêiner que rola dentro de si, as arestas
-   em SVG e os nós em HTML posicionado. */
-
-/* ---------- grafo de dependências ---------- */
-
-/* Alternador de visão. Não é preferência guardada: mora no hash, como o resto da
-   navegação — o que faz o grafo de um esforço ser um link colável. */
-.viewswitch {
-  display: inline-flex;
-  gap: 2px;
-  margin: 0 0 14px;
-  padding: 2px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-}
-
-.viewswitch button {
-  padding: 0 16px;
-  min-height: calc(var(--tap) - 4px);
-  font: inherit;
-  font-size: 12px;
-  color: var(--muted);
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.viewswitch button.on {
-  color: var(--text);
-  background: var(--panel-3);
-}
+/* graph — o painel direito (`#pane-right`) quando o alvo da rota é uma pasta: o contêiner
+   que rola dentro de si, as arestas em SVG e os nós em HTML posicionado. O modo (deps do
+   `Blocked by:` ou links relativos) é decisão do servidor; a folha não sabe qual é. */
 
 /* O grafo é uma superfície de desktop: os nós têm largura fixa em pixels porque a
    posição das curvas é calculada em cima dela. Num telefone ele não vira uma coluna —
@@ -135,10 +105,6 @@
 
 .gnode .chip {
   align-self: flex-start;
-}
-
-.gnode.is-blocked {
-  border-left: 2px solid var(--red);
 }
 
 /* Fechada continua no grafo — é ela que explica o que soltou a frontier —, mas

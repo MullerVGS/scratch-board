@@ -27,7 +27,7 @@ import { buildTree, errorTree } from './tree.js'
 
 const hashOf = (json) => createHash('sha1').update(json).digest('hex')
 
-/** Arquivo grande a gaveta nem exibe (o servidor manda o tamanho). Não se lê um PNG para saber que ele mexeu. */
+/** Arquivo grande o viewer nem exibe (o servidor manda o tamanho). Não se lê um PNG para saber que ele mexeu. */
 const BIG = 512 * 1024
 
 /**
@@ -111,7 +111,7 @@ export function createCache(ns) {
   // **para de reportar um nome depois que um `rename` troca o inode por baixo dele** — e é
   // assim que os agentes escrevem (`.md.tmp.NNNN` + `rename` por cima). A **primeira** edição
   // de um arquivo aparece na lista; da segunda em diante só o `.tmp` aparece, e o `.md` some
-  // do relato do kernel. Construída sobre essa lista, a gaveta viva funcionaria uma vez por
+  // do relato do kernel. Construído sobre essa lista, o viewer vivo funcionaria uma vez por
   // arquivo e depois calaria — o pior modo de falha, porque *parece* funcionar.
   //
   // Então o watcher é **gatilho**, não testemunha: ele diz *que* o disco mexeu (para isso ele
@@ -130,7 +130,7 @@ export function createCache(ns) {
    *
    * Sumiço conta como mudança: quem estava lendo o arquivo precisa saber que ele não existe
    * mais. E arquivo novo também — **no escuro, avisa-se**. A assimetria é deliberada: um
-   * evento a mais custa algumas centenas de bytes e a gaveta o descarta; um evento a menos é
+   * evento a mais custa algumas centenas de bytes e o viewer o descarta; um evento a menos é
    * silêncio, e silêncio é o modo de falha que o push existe para eliminar.
    */
   async function movedFiles() {
