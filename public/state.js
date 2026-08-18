@@ -1,19 +1,17 @@
 /**
- * Os boards que o cliente tem na mão — **um por origem**, e o último payload de cada um.
+ * O board que o cliente tem na mão — **um por origem**, e o último payload de cada um.
  *
- * `namespaces` é a ordem em que as origens aparecem (a de casa primeiro), e `boards` guarda
- * o board de cada uma pelo nome. O cliente carrega **todas** as origens, não só a que está
- * na tela: é o que permite a uma origem inativa receber o push, atualizar o seu estado sem
- * redesenhar a origem ativa, e já estar pronta quando você troca de aba.
+ * `boards` guarda o board de cada origem pelo nome; `active` é a origem que está na
+ * tela agora. As chaves de `boards` nascem do snapshot do SSE (`router.js`, `connect()`):
+ * um `message` por origem, casa-primeiro — é dali que a fileira de abas se monta, sem
+ * precisar de um endpoint que liste as origens.
  *
- * É *um* objeto mutável e não um `let` exportado de propósito: um binding exportado é uma
- * cópia viva só para quem importa o módulo, e reatribuí-lo do roteador não chegaria em quem
- * já leu. Com o contêiner, todo mundo vê a mesma referência.
+ * É *um* objeto mutável e não um `let` exportado de propósito: um binding exportado é
+ * cópia viva só para quem já importou o módulo, e reatribuí-lo do roteador não chegaria
+ * em quem já leu. Com o contêiner, todo mundo — `shell.js`, `router.js`, `app.js` — vê a
+ * mesma referência.
  *
- * É daqui que as views leem `root`, `columns`, `efforts` e `archived` — sempre da origem que
- * estão desenhando, nunca de "o board".
+ * A tela redesenha **só se `ns === state.active`**: um board novo de uma origem inativa
+ * fica guardado, calado, e só aparece quando você troca de aba.
  */
-export const state = { namespaces: [], boards: {} }
-
-/** O board de uma origem, ou `null` se ela não existe (hash colado à mão, mount removido). */
-export const boardOf = (ns) => state.boards[ns] ?? null
+export const state = { boards: {}, active: null }

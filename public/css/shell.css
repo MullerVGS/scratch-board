@@ -1,5 +1,12 @@
-/* shell — a moldura da página: topo, trilha, área principal, cabeçalho de seção,
-   toast e o estado vazio. Nada aqui sabe o que o board mostra por dentro. */
+/* shell — a moldura da página: o topo (título, `.dot` de conexão, abas, botão de reler)
+   e os dois painéis. Nada aqui sabe o que o painel direito mostra por dentro — isso é
+   `tree.css`/`viewer.css`/`markdown.css`/`graph.css`. */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
 
 /* ---------- topo ---------- */
 
@@ -77,132 +84,126 @@ h1 {
   flex: 1;
 }
 
-/* O contador é a informação mais dispensável do topo: no estreito ele sai antes
-   que o resto comece a se espremer. */
-.tally {
-  display: none;
-  color: var(--muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
+/* ---------- as abas de origem ---------- */
 
-@media (min-width: 900px) {
-  .tally {
-    display: inline;
-  }
-}
+/* A faixa de origens. Ela **só existe com mais de uma** (`renderTabs`, em `shell.js`),
+   então o board de um workspace só continua exatamente como era: nada a escolher, nada
+   na tela.
 
-nav {
+   Não abre media query: os tokens já dão o alvo de toque (`--tap`), e no estreito a
+   faixa some para baixo do título por conta do próprio `flex-wrap: wrap` do `header`. */
+.nstabs {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--faint);
-  font-size: 13px;
-}
-
-/* No estreito a trilha desce para uma linha própria: quatro elementos numa faixa de
-   56px é o que quebra primeiro. */
-nav:not(:empty) {
-  flex-basis: 100%;
-  order: 3;
-}
-
-@media (min-width: 900px) {
-  nav:not(:empty) {
-    flex-basis: auto;
-    order: 0;
-  }
-}
-
-nav span {
-  display: inline-flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  font-family: var(--mono);
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-nav button {
-  background: none;
-  border: 0;
-  color: var(--accent);
-  font: inherit;
-  cursor: pointer;
-  padding: 3px 7px;
+.nstab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
   min-height: var(--tap);
-  border-radius: 6px;
-  white-space: nowrap;
-  transition: background 0.12s;
-}
-
-nav button:hover {
-  background: var(--panel-2);
-}
-
-main {
-  padding: clamp(18px, 3vw, 28px) max(var(--gutter), env(safe-area-inset-right))
-    calc(48px + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
-  max-width: 1440px;
-  margin: 0 auto;
-}
-
-/* ---------- seções ---------- */
-
-.section {
-  margin-bottom: clamp(26px, 3vw, 36px);
-}
-
-.section-head {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  padding-bottom: 10px;
-  margin-bottom: var(--gap);
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.section-head h2 {
-  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--sans);
   font-size: 12px;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text);
-  font-weight: 650;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-.section-head .n {
-  font-family: var(--mono);
+.nstab:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.nstab.on {
+  background: var(--panel-3);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+/* A contagem de arquivos da origem — **inclusive quando ela não está na tela**. É a
+   única coisa que diz que a outra origem andou; sem ela, uma origem inativa que recebeu
+   um push seria indistinguível de uma parada, e o board voltaria a ficar mudo sobre o
+   que não está debaixo do olho. */
+.nstab b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
   font-size: 11px;
   color: var(--faint);
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 99px;
-  padding: 0 7px;
-  line-height: 17px;
 }
 
-/* A glosa da seção não disputa a linha do título no estreito: cai para baixo e
-   alinha à esquerda, como o texto que é. */
-.section-head p {
-  margin: 0;
-  flex-basis: 100%;
+.nstab.on b {
+  color: var(--accent);
+}
+
+/* A origem não deu para ler. O número seria uma mentira — zero arquivos é uma afirmação
+   sobre o disco, e o disco não respondeu. */
+.nstab b.bad {
+  color: var(--red);
+}
+
+/* ---------- os dois painéis ---------- */
+
+/* Mobile-first: a árvore empilha **acima** do conteúdo, com altura própria e rolagem
+   interna — ela não pode tomar a tela inteira e esconder o painel direito. É a forma
+   estreita da "gaveta" que o alvo pede; a versão com abrir/fechar por toque é da tarefa
+   que desenha a árvore de verdade, que é quem sabe o que faz sentido esconder. */
+.panes {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+#pane-left {
+  flex: none;
+  max-height: 38vh;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+#pane-right {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--gutter);
+}
+
+/* Do desktop para cima, os dois painéis dividem a largura: a árvore vira uma coluna
+   fixa e rolável, o conteúdo ocupa o resto. */
+@media (min-width: 900px) {
+  .panes {
+    flex-direction: row;
+  }
+
+  #pane-left {
+    flex: none;
+    width: 300px;
+    max-height: none;
+    height: auto;
+    overflow-y: auto;
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+  }
+}
+
+/* O texto de espera dos stubs (`tree.js`/`viewer.js`/`graph.js`, tarefa 03) — some assim
+   que a tarefa que desenha aquele painel de verdade substituir o conteúdo. */
+.stub {
+  padding: var(--gutter);
   color: var(--faint);
+  font-family: var(--mono);
   font-size: 12.5px;
 }
 
-@media (min-width: 900px) {
-  .section-head p {
-    flex-basis: auto;
-    margin-left: auto;
-    text-align: right;
-  }
-}
 /* ---------- toast ---------- */
 
 #toast {
@@ -230,6 +231,8 @@ main {
   }
 }
 
+/* ---------- estado vazio ---------- */
+
 .empty {
   color: var(--faint);
   font-size: 12px;
@@ -238,8 +241,8 @@ main {
 }
 
 /* Origem que não deu para ler. Vermelho porque **não é um estado vazio**: um `.scratch/`
-   sem esforço é uma coisa (e a `.empty` de sempre a diz), e um `.scratch/` que o disco
-   recusou é outra. O board tem que saber dizer as duas com palavras diferentes. */
+   sem arquivo é uma coisa, e um `.scratch/` que o disco recusou é outra — o board tem
+   que saber dizer as duas com palavras diferentes. */
 .empty.bad {
   color: var(--red);
 }
@@ -247,71 +250,4 @@ main {
 .empty.bad strong {
   display: block;
   margin-bottom: 4px;
-}
-
-/* ---------- as abas de origem ---------- */
-
-/* A faixa de origens. Ela **só existe com mais de uma** (`renderTabs`), então o board de um
-   workspace só continua exatamente como era: nada a escolher, nada na tela.
-
-   Não abre media query: os tokens já dão o alvo de toque (`--tap`) e a regra genérica de
-   `nav` do topo já desce a faixa para uma linha própria no estreito. Aqui é só forma. */
-.nstabs {
-  gap: 4px;
-}
-
-.nstab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  min-height: var(--tap);
-  border: 1px solid transparent;
-  border-radius: 999px;
-  color: var(--muted);
-  font-family: var(--sans);
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-
-/* A regra genérica `nav span` deixa o texto monoespaçado e apagado — ela foi escrita para a
-   trilha, que é caminho. O nome de uma origem é nome, não caminho. */
-.nstab span {
-  font-family: inherit;
-  color: inherit;
-}
-
-.nstab:hover {
-  background: var(--panel-2);
-  color: var(--text);
-}
-
-.nstab.on {
-  background: var(--panel-3);
-  border-color: var(--line);
-  color: var(--text);
-}
-
-/* A contagem de issues abertas da origem — **inclusive quando ela não está na tela**. É a
-   única coisa que diz que a outra origem andou; sem ela, uma origem inativa que recebeu um
-   push seria indistinguível de uma parada, e o board voltaria a ficar mudo sobre o que não
-   está debaixo do olho. */
-.nstab b {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  font-size: 11px;
-  color: var(--faint);
-}
-
-.nstab.on b {
-  color: var(--accent);
-}
-
-/* A origem não deu para ler. O número seria uma mentira — zero issues abertas é uma
-   afirmação sobre o disco, e o disco não respondeu. */
-.nstab b.bad {
-  color: var(--red);
 }

@@ -12,56 +12,30 @@
          `@import` dentro de um CSS seria serial (cada folha só é descoberta depois que a
          anterior chega), e sem bundler não há quem as junte.
 
-         A ordem abaixo **é** a cascata, e reproduz a do antigo `style.css`: `base`
-         primeiro, porque é dele que todas as outras leem os tokens; o resto na ordem em
-         que as telas se sobrepõem. Mexer na ordem é mexer no desempate entre regras de
-         mesma especificidade — não é decoração. -->
+         A ordem abaixo **é** a cascata: `base` primeiro, porque é dele que todas as
+         outras leem os tokens; `shell` (a moldura) e `components` (o que reaparece em
+         mais de uma tela) na sequência; depois as folhas de cada painel, na ordem em que
+         se sobrepõem — `tree` (a árvore, painel esquerdo), `viewer` (o arquivo cru),
+         `markdown` (o `.md` renderizado, dentro do viewer) e `graph` (o grafo de uma
+         pasta). Mexer na ordem é mexer no desempate entre regras de mesma
+         especificidade — não é decoração. -->
 
     <link rel="stylesheet" href="/css/base.css" />
     <link rel="stylesheet" href="/css/shell.css" />
-    <link rel="stylesheet" href="/css/efforts.css" />
-    <link rel="stylesheet" href="/css/pads.css" />
     <link rel="stylesheet" href="/css/components.css" />
-    <link rel="stylesheet" href="/css/kanban.css" />
-    <link rel="stylesheet" href="/css/drawer.css" />
+    <link rel="stylesheet" href="/css/tree.css" />
+    <link rel="stylesheet" href="/css/viewer.css" />
     <link rel="stylesheet" href="/css/markdown.css" />
     <link rel="stylesheet" href="/css/graph.css" />
-    <link rel="stylesheet" href="/css/gantt.css" />
     <link
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>"
     />
   </head>
   <body>
-    <header>
-      <h1><span class="dot"></span> scratch</h1>
-      <!-- As origens. Só aparecem quando há mais de uma para escolher. -->
-      <nav id="ns-tabs" class="nstabs"></nav>
-      <nav id="crumbs"></nav>
-      <div class="spacer"></div>
-      <span id="tally" class="tally"></span>
-      <a id="pads-link" class="navlink" href="#/pads">scratchpads</a>
-    </header>
-
-    <main id="view"></main>
-
-    <aside id="drawer" hidden>
-      <!-- Arraste para redimensionar; duplo clique volta à largura padrão. -->
-      <div id="drawer-grip" role="separator" aria-orientation="vertical" title="Arraste para redimensionar"></div>
-      <div class="drawer-head">
-        <!-- Só aparece quando você seguiu um link de dentro do documento. -->
-        <button id="drawer-back" class="icon" title="Voltar (Esc)" hidden>←</button>
-        <div>
-          <span id="drawer-eyebrow" class="eyebrow"></span>
-          <h2 id="drawer-title"></h2>
-        </div>
-        <button id="drawer-close" class="icon" title="Fechar (Esc)">✕</button>
-      </div>
-      <div id="drawer-actions" hidden></div>
-      <!-- Sem `.md` é literal e monoespaçado (rascunho, log, JSON); com `.md`, documento. -->
-      <div id="drawer-body"></div>
-    </aside>
-    <div id="scrim" hidden></div>
+    <!-- `shell.js` monta a moldura inteira aqui dentro (`renderShell()`, no boot do
+         `app.js`) — nada de markup fixo além deste ponto de montagem e do toast. -->
+    <div id="app"></div>
 
     <div id="toast" hidden></div>
 

@@ -1,6 +1,6 @@
-/* components — o que reaparece em mais de uma tela: botão de copiar, prompt de skill,
-   chip de status e a barra de ação do esforço. Aqui é onde um alvo copiável novo herda
-   as regras do `copyBtn()` sem reimplementá-las. */
+/* components — o que reaparece em mais de uma tela: botão de copiar, botão de ícone,
+   rótulo de status e o botão de reler. Aqui é onde um alvo copiável novo herda as
+   regras do `copyBtn()` sem reimplementá-las. */
 
 /* ---------- copiar ----------
 
@@ -43,7 +43,7 @@
   content: "✓";
 }
 
-:where(.effort, .card, .file, .pad, .prompt, .drawer-head, .actionbar, nav):hover .copy {
+:where(.stub, nav):hover .copy {
   opacity: 0.7;
 }
 
@@ -90,78 +90,34 @@
   }
 }
 
-/* ---------- prompts de skill ----------
+/* ---------- botão de ícone ----------
 
-   O comando aparece literal e é o próprio alvo da cópia: você cola o que leu.
+   O botão-ícone genérico: alvo de toque quadrado, sem borda, sem fundo até o hover.
+   Nasceu na gaveta antiga (`drawer.css`, morta nesta tarefa); o botão de reler já era o
+   único outro consumidor, então ele mora aqui agora — mover, não duplicar. */
 
-   O comando manda no layout: ele ocupa a linha inteira e quebra por palavra, em vez de
-   rolar na horizontal dentro de uma faixa estreita. Ler o comando é o ponto — um trecho
-   escondido atrás de scroll lateral é um comando que você cola sem ter lido. */
-
-.prompts {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 18px;
-}
-
-.prompt {
-  display: flex;
+button.icon {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  min-width: 0;
-  padding: 10px 10px 10px 12px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--line);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-}
-
-.prompt.primary {
-  border-left-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
-}
-
-.prompt code {
-  flex-basis: 100%;
-  font: 12.5px/1.55 var(--mono);
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.prompt .hint {
-  flex: 1;
-  min-width: 0;
+  justify-content: center;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  background: none;
+  border: 0;
   color: var(--faint);
-  font-size: 12px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s, color 0.12s;
 }
 
-.prompt .copy {
-  margin-left: auto;
+button.icon:hover {
+  background: var(--panel-2);
+  color: var(--text);
 }
 
-/* Com espaço, o comando volta a dividir a linha com a dica — a leitura fica numa
-   varredura só, e a lista de prompts fica curta. */
-@media (min-width: 900px) {
-  .prompt {
-    flex-wrap: nowrap;
-  }
-
-  .prompt code {
-    flex-basis: auto;
-    white-space: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .prompt .hint {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
 /* ---------- rótulos de status ---------- */
 
 .chip {
@@ -198,8 +154,6 @@
   background: color-mix(in srgb, var(--amber) 10%, var(--panel-2));
 }
 
-/* `open` divide a coluna `pronto` com os `ready-*`, e divide a cor: os três dizem
-   "dá para pegar agora". */
 .chip[data-s="open"],
 .chip[data-s^="ready"] {
   color: var(--accent);
@@ -230,86 +184,12 @@
   border-color: color-mix(in srgb, var(--red) 42%, transparent);
   background: color-mix(in srgb, var(--red) 12%, var(--panel-2));
 }
-/* ---------- barra de ação do esforço ---------- */
-
-.actionbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 16px;
-  box-shadow: var(--shadow);
-}
-
-.actionbar.ready {
-  border-color: color-mix(in srgb, var(--green) 40%, var(--line));
-  background: color-mix(in srgb, var(--green) 7%, var(--panel));
-}
-
-/* A frase toma a linha inteira no estreito; com espaço, ela empurra os botões para a
-   direita. Um `margin-left: auto` no botão faria o mesmo, mas quebraria quando os
-   botões passam de dois. */
-.actionbar p {
-  margin: 0;
-  flex-basis: 100%;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-@media (min-width: 640px) {
-  .actionbar p {
-    flex: 1;
-    flex-basis: auto;
-    margin-right: auto;
-  }
-}
-
-button.act {
-  font: inherit;
-  font-size: 12px;
-  font-family: var(--mono);
-  padding: 0 12px;
-  min-height: var(--tap);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--muted);
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
-}
-
-button.act:hover {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 9%, var(--panel-2));
-}
-
-button.act.primary {
-  font-family: var(--sans);
-  font-weight: 600;
-  border-color: color-mix(in srgb, var(--green) 45%, transparent);
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
-}
-
-button.act.primary:hover {
-  background: color-mix(in srgb, var(--green) 18%, transparent);
-  border-color: var(--green);
-  color: var(--green);
-}
 
 /* ---------- reler o board ----------
 
    A válvula de escape humana: para quando você não confia no que está vendo. Ela vale
    pouco sozinha — o board já chega sozinho — e vale tudo quando o pontinho está âmbar.
-
-   Herda `button.icon` (tamanho, alvo de toque, hover), que hoje ainda mora no
-   `drawer.css` por ter nascido lá. As nove folhas carregam todas, então ele já se
-   aplica aqui — mas o lugar dele é esta folha. Mover, não duplicar. */
+   Herda `button.icon` acima. */
 
 button.refresh {
   font-size: 14px;
@@ -340,7 +220,7 @@ button.refresh.spin {
   }
 }
 
-/* A nota que uma visão deixa sob o desenho — o grafo sem aresta, o piso do Gantt. Mora
+/* A nota que uma visão deixa sob o desenho — o grafo sem aresta, um painel vazio. Mora
    aqui porque reaparece em mais de uma tela; mover, não duplicar. */
 .viewnote {
   margin: 8px 0 12px;

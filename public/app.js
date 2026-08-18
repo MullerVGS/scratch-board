@@ -1,27 +1,48 @@
 /**
  * O ponto de entrada — e só isso.
  *
- * O board é um assunto por módulo: `dom.js` (DOM, rede e copiar), `shell.js` (a
- * moldura), `state.js` (o board na mão do cliente), `prompts.js` (o comando que
- * destrava cada estado), `issues.js` e `graph-layout.js` (puros, sem DOM),
- * `overview.js`, `effort.js`, `graph.js`, `pads.js`, `drawer.js` e `router.js`.
- *
- * Aqui só se liga o fio: a gaveta ao documento, o hash ao roteador, e o board à tela.
+ * Monta a moldura, liga o hash ao roteador e é o **controlador do painel direito**: acha
+ * o nó da rota atual varrendo `state.boards[ns].tree` e chama quem sabe desenhá-lo — o
+ * grafo para `type:'dir'`, o viewer para `type:'file'`.
  */
-import { esc } from './dom.js'
-import { view } from './shell.js'
-import { initDrawer } from './drawer.js'
-import { route, refresh, connect } from './router.js'
+import { renderShell, paneLeft, paneRight } from './shell.js'
+import { route, activeNs, activeRel, connect } from './router.js'
+import { state } from './state.js'
+import { renderTree } from './tree.js'
+import { showFile } from './viewer.js'
+import { showFolder } from './graph.js'
 
-initDrawer()
+function findNode(nodes, rel) {
+  for (const node of nodes) {
+    if (node.rel === rel) return node
+    if (node.type === 'dir') {
+      const hit = findNode(node.children, rel)
+      if (hit) return hit
+    }
+  }
+  return null
+}
 
-addEventListener('hashchange', route)
+function render() {
+  route()
+  const ns = activeNs()
+  const board = ns ? state.boards[ns] : null
+  if (!board) return
 
-// O primeiro board vem por HTTP; daí em diante ele **chega sozinho**. O `/api/stream`
-// também manda um snapshot ao conectar, mas o `refresh()` não é redundante: ele é a
-// primeira pintura, e não depende de o stream ter subido.
-refresh().catch((err) => {
-  view.innerHTML = `<p class="empty">Falha ao ler o board: ${esc(err.message)}</p>`
+  const rel = activeRel()
+  const node = rel ? findNode(board.tree, rel) : { type: 'dir', name: ns, path: board.root, ref: board.root, rel: '' }
+
+  renderTree(paneLeft, ns, board, node?.path ?? null)
+  if (!node) return
+  node.type === 'dir' ? showFolder(paneRight, ns, node) : showFile(paneRight, ns, node)
+}
+
+renderShell()
+
+addEventListener('hashchange', render)
+addEventListener('board:push', (ev) => {
+  if (ev.detail.ns === activeNs()) render()
 })
 
 connect()
+render()

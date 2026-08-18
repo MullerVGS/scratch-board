@@ -1,0 +1,4 @@
+/* viewer — o arquivo cru do painel direito (`#pane-right`) quando o alvo é `type:'file'`.
+   Vazio de propósito: o `public/viewer.js` desta tarefa é um stub; a tarefa seguinte
+   desenha o viewer de verdade (texto monoespaçado, ou `.md` via `markdown.css`) e
+   preenche esta folha. O `<link>` já existe no `index.html`, na ordem certa da cascata. */

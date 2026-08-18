@@ -2,18 +2,18 @@
    base — tokens, breakpoints e reset. Sem build step.
 
    Este é o **único** arquivo que declara token e o **único** que abre um
-   breakpoint de escala. As folhas de assunto (shell, efforts, pads, components,
-   kanban, drawer, markdown, graph) consomem os tokens e só abrem media query
-   quando o que muda é a *forma* — nunca o tamanho. Não há `@import`: o
-   `index.html` traz as folhas em vários `<link>`, que o navegador busca em
-   paralelo, e a ordem dos `<link>` é a cascata.
+   breakpoint de escala. As folhas de assunto (shell, components, tree, viewer,
+   markdown, graph) consomem os tokens e só abrem media query quando o que
+   muda é a *forma* — nunca o tamanho. Não há `@import`: o `index.html` traz
+   as folhas em vários `<link>`, que o navegador busca em paralelo, e a ordem
+   dos `<link>` é a cascata.
 
    A lógica é **mobile-first e por token**, não desktop-first por exceção.
 
    O layout nunca pergunta o tamanho da tela: ele lê `--gutter`, `--gap`,
    `--fs-doc` e `--tap` do `:root`. Os breakpoints reajustam esses tokens, e só
-   tocam em regra de layout quando o que muda é a *forma* (a gaveta que vira
-   tela cheia, o kanban que empilha) — nunca quando é só *tamanho*.
+   tocam em regra de layout quando o que muda é a *forma* (a árvore que empilha
+   sobre o conteúdo no estreito) — nunca quando é só *tamanho*.
 
    O valor base é o do celular; `min-width` sobe dali. Isso importa para a
    tipografia: o texto de leitura quer ~15,5px no celular e ~13,5px no desktop,

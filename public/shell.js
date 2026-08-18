@@ -1,63 +1,64 @@
 /**
- * A moldura: os três pontos fixos da página que toda view escreve, mais as duas coisas
- * que o cabeçalho diz sobre o próprio board — se ele ainda está ouvindo, e o botão que
- * força a releitura quando você não confia no que está vendo.
+ * A moldura: os pontos fixos da tela — o cabeçalho (título, `.dot` de conexão, abas de
+ * origem, botão de reler) e os dois painéis, `#pane-left` (a árvore) e `#pane-right` (o
+ * conteúdo do alvo — viewer ou grafo, conforme o tipo do nó). `router.js` e `app.js`
+ * amarram o resto; nada aqui sabe o que o alvo é nem como ele se desenha.
  *
- * `view` é onde a tela é montada, `crumbs` é a trilha do topo e `tally` é a contagem
- * à direita.
- *
- * **A honestidade da conexão.** Um board que empurra falha em silêncio, e silêncio é
- * indistinguível de "nada mudou": sem indicador, o servidor morto e o board parado têm o
- * mesmo pixel. O pontinho do `<h1>` é o que distingue os dois — verde ouvindo, âmbar
- * tentando voltar, vermelho quando desistiu de fingir. Ele é a única coisa na tela que
- * pode dizer *não sei*, e é por isso que ele existe.
+ * `renderShell()` monta a moldura **uma vez**, no boot (`app.js`). Os dois painéis saem
+ * como bindings vivas (`export let`) — o import é uma referência que se atualiza sozinha
+ * assim que `renderShell()` roda, então quem os importa antes não precisa reimportar.
  */
 import { el, esc, toast } from './dom.js'
 import { state } from './state.js'
 
-export const view = document.getElementById('view')
-export const crumbs = document.getElementById('crumbs')
-export const tally = document.getElementById('tally')
+const app = document.getElementById('app')
 
-const dot = document.querySelector('h1 .dot')
-const tabs = document.getElementById('ns-tabs')
+/** O container do painel esquerdo (a árvore) — `null` até `renderShell()` rodar. */
+export let paneLeft = null
+/** O container do painel direito (viewer ou grafo) — idem. */
+export let paneRight = null
+
+/** O botão de reler, para quem for wireá-lo (`router.js`, que tem o `refresh()`). */
+export let refreshBtn = null
+
+let dot = null
+let tabsEl = null
+
+/** Todo arquivo da subárvore, recursivo — o número que a aba mostra. */
+const countFiles = (nodes) =>
+  nodes.reduce((n, node) => n + (node.type === 'file' ? 1 : countFiles(node.children ?? [])), 0)
 
 /**
  * As abas de origem — a única superfície que diz que existe mais de um `.scratch/`.
  *
- * Cada aba mostra quantas issues a origem tem em aberto, e **a contagem é relida a cada
- * push**, inclusive o de uma origem que não está na tela. É de propósito: sem isso, uma
- * origem inativa que andou seria indistinguível de uma parada, e o board voltaria a ficar
- * mudo sobre o que não está debaixo do olho — que é a doença que o push inteiro cura. A aba
- * é o "não sei" do indicador de conexão, um andar acima: ela sabe, e mostra.
+ * **Nascem do snapshot**: não há endpoint que liste as origens; a lista é
+ * `Object.keys(state.boards)`, na ordem em que os `message` do SSE chegaram — casa
+ * primeiro, porque é o primeiro frame que o servidor escreve. Com uma origem só, não há
+ * o que escolher e a faixa fica vazia — o board se comporta como antes de existirem
+ * origens.
  *
- * Só o número muda sozinho; a tela não. Trocar de origem é navegar, e navegar é do humano.
- *
- * Com uma origem só, não há o que escolher e a faixa não aparece — o board fica exatamente
- * como era antes de existirem origens.
+ * `replaceChildren`, nunca `innerHTML = ''`: a faixa nova entra montada de lado e troca
+ * de uma vez.
  */
-export function renderTabs(active) {
-  if (state.namespaces.length < 2) return tabs.replaceChildren()
+export function renderTabs() {
+  const names = Object.keys(state.boards)
+  if (names.length < 2) return tabsEl.replaceChildren()
 
-  tabs.replaceChildren(
-    ...state.namespaces.map((name) => {
+  tabsEl.replaceChildren(
+    ...names.map((name) => {
       const board = state.boards[name]
-      const abertas = board ? board.efforts.reduce((n, e) => n + (e.total - e.closed), 0) : 0
+      const bad = Boolean(board?.error)
+      const n = bad ? null : countFiles(board?.tree ?? [])
       return el(`
-        <a class="nstab ${name === active ? 'on' : ''}" href="#/${esc(name)}"
-           aria-current="${name === active}">
+        <a class="nstab ${name === state.active ? 'on' : ''}" href="#/${esc(name)}"
+           aria-current="${name === state.active}">
           <span>${esc(name)}</span>
-          ${board?.error ? '<b class="bad" title="falha ao ler esta origem">!</b>' : `<b>${abertas}</b>`}
+          ${bad ? '<b class="bad" title="falha ao ler esta origem">!</b>' : `<b>${n}</b>`}
         </a>
       `)
     }),
   )
 }
-
-/** Quanto tempo tentando reconectar antes de admitir que o servidor não está lá. */
-const DEAD_MS = 6000
-/** Piso da animação do botão: um giro que dura 20ms não é feedback, é um piscar. */
-const SPIN_MS = 420
 
 const LABEL = {
   live: 'conectado — o board chega sozinho',
@@ -65,84 +66,70 @@ const LABEL = {
   dead: 'sem conexão com o servidor — o que você vê pode estar velho',
 }
 
-let deadTimer = null
-
-/** O estado da conexão vira um atributo; a cor e o pulso são do CSS (`shell.css`). */
-function setConn(state) {
-  dot.dataset.conn = state
-  dot.title = LABEL[state]
-  dot.setAttribute('aria-label', LABEL[state])
+/**
+ * O estado da conexão vira atributo (`data-conn`); a cor e o pulso são do `shell.css`.
+ * É a única coisa na tela capaz de dizer "não sei" — ver `router.js`, `connect()`.
+ */
+export function setConn(estado) {
+  dot.dataset.conn = estado
+  dot.title = LABEL[estado]
+  dot.setAttribute('aria-label', LABEL[estado])
 }
 
-const nap = (ms) => new Promise((ok) => setTimeout(ok, ms))
+/** Piso da animação do botão: um giro de 20ms não é feedback, é um piscar. */
+export const SPIN_MS = 420
 
-/** A válvula de escape: relê o board por HTTP, agora, porque você mandou. */
-function mountRefresh(onRefresh) {
-  const btn = el(`
-    <button id="refresh" class="icon refresh" type="button"
-            title="Reler o board do disco" aria-label="Reler o board do disco">⟳</button>
+/**
+ * Monta a moldura inteira e a prende em `#app`. Chamada uma vez, no boot.
+ *
+ * `replaceChildren`, nunca `innerHTML = ''` — evita o frame em branco entre esvaziar e
+ * preencher.
+ */
+export function renderShell() {
+  const frame = el(`
+    <div class="shell">
+      <header>
+        <h1><span class="dot"></span> scratch</h1>
+        <nav id="ns-tabs" class="nstabs"></nav>
+        <div class="spacer"></div>
+        <button id="refresh" class="icon refresh" type="button"
+                title="Reler o board do disco" aria-label="Reler o board do disco">⟳</button>
+      </header>
+      <div class="panes">
+        <aside id="pane-left"></aside>
+        <main id="pane-right"></main>
+      </div>
+    </div>
   `)
+  app.replaceChildren(frame)
 
-  btn.onclick = async () => {
-    btn.classList.add('spin')
-    btn.disabled = true
+  dot = frame.querySelector('.dot')
+  tabsEl = frame.querySelector('#ns-tabs')
+  refreshBtn = frame.querySelector('#refresh')
+  paneLeft = frame.querySelector('#pane-left')
+  paneRight = frame.querySelector('#pane-right')
+
+  setConn('retry') // ainda não abriu o stream: fica âmbar até o primeiro `onopen`
+}
+
+/**
+ * A válvula humana: relê o board de `ns` agora, com o giro e o toast que confirmam que
+ * algo aconteceu. `onRefresh` é o `router.refresh`; fica por fora para `shell.js` não
+ * precisar importar `router.js` de volta.
+ */
+export function wireRefresh(onRefresh) {
+  const nap = (ms) => new Promise((ok) => setTimeout(ok, ms))
+  refreshBtn.onclick = async () => {
+    refreshBtn.classList.add('spin')
+    refreshBtn.disabled = true
     try {
-      // O `/api/board` não serve cache: ele relê o disco de verdade (e, se algo tiver
-      // mudado, as outras abas recebem o push). O botão não é uma mentira.
-      // O `nap` é só para o giro ser visível — o board costuma voltar antes dele.
       await Promise.all([onRefresh(), nap(SPIN_MS)])
       toast('Board relido do disco')
     } catch (err) {
       toast(`Falha ao reler: ${err.message}`)
     } finally {
-      btn.disabled = false
-      btn.classList.remove('spin')
+      refreshBtn.disabled = false
+      refreshBtn.classList.remove('spin')
     }
-  }
-
-  tally.after(btn)
-  return btn
-}
-
-/** Desistiu: o servidor não voltou, e o board para de fingir que sabe. */
-function die() {
-  clearTimeout(deadTimer)
-  deadTimer = null
-  setConn('dead')
-}
-
-/**
- * Liga o cabeçalho ao stream: o pontinho passa a contar a verdade sobre a conexão, e o
- * botão de refresh ganha o que chamar.
- *
- * O `EventSource` reconecta sozinho, então um erro **não** é a morte — `readyState`
- * `CONNECTING` é ele tentando de novo, e é isso que o âmbar diz. Só depois de `DEAD_MS`
- * sem conseguir voltar é que o indicador vira vermelho: dizer "morto" no primeiro soluço
- * seria tão desonesto quanto continuar verde com o servidor no chão.
- *
- * A contagem é desde a última vez que o stream esteve **aberto**, não desde o último
- * erro — e a distinção não é sutil, é a diferença entre funcionar e não funcionar. O
- * `EventSource` erra a cada tentativa (`retry: 2000`), então rearmar o relógio a cada
- * erro o adiaria para sempre: o indicador ficaria âmbar, eternamente "reconectando", com
- * o servidor no chão. Foi assim que ele nasceu, e foi o navegador que denunciou.
- */
-export function bindConnection(source, onRefresh) {
-  mountRefresh(onRefresh)
-  setConn('retry') // ainda não abriu: o board só fica verde quando o stream responde
-
-  source.onopen = () => {
-    clearTimeout(deadTimer)
-    deadTimer = null
-    setConn('live')
-  }
-
-  source.onerror = () => {
-    // `CLOSED` é o fim de linha: o `EventSource` não tenta mais, e nem adianta esperar.
-    if (source.readyState === EventSource.CLOSED) return die()
-    // Já admitiu que não sabe. Continua tentando, calado — voltar para o âmbar a cada
-    // tentativa seria piscar de vermelho a âmbar de dois em dois segundos para sempre.
-    if (dot.dataset.conn === 'dead') return
-    setConn('retry')
-    deadTimer ??= setTimeout(die, DEAD_MS)
   }
 }
