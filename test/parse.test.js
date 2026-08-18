@@ -2,7 +2,7 @@
  * Caracterização do parser do servidor — o comportamento que existe HOJE.
  *
  * Estes testes não julgam o parser: eles o congelam. São a rede que torna segura a
- * fusão das duas implementações num `shared/doc.js` só. Os dois bugs que o `AGENTS.md`
+ * fusão das duas implementações num `shared/parse.js` só. Os dois bugs que o `AGENTS.md`
  * registra quebraram em silêncio — o parser não estoura, ele só passa a ler
  * `Data: 2026-07-12` como resumo, ou a marcar uma issue bloqueada como livre.
  *
@@ -20,14 +20,16 @@ import {
   columnOf,
   isClosed,
   preambleEnd,
-} from '../shared/doc.js'
+  relLinks,
+  cleanTitle,
+} from '../shared/parse.js'
 
 describe('parseDoc — os três dialetos de cabeçalho', () => {
   test('wayfinder: chaves antes do `# Título`', () => {
     const { header, title } = parseDoc(
-      ['Status: ready-for-agent', 'Type: task', 'Repo: scratch-board', 'Blocked by: 01', '', '# Extrair o shared/doc.js', '', 'Prosa.'].join('\n'),
+      ['Status: ready-for-agent', 'Type: task', 'Repo: scratch-board', 'Blocked by: 01', '', '# Extrair o shared/parse.js', '', 'Prosa.'].join('\n'),
     )
-    assert.equal(title, 'Extrair o shared/doc.js')
+    assert.equal(title, 'Extrair o shared/parse.js')
     assert.deepEqual(header, {
       status: 'ready-for-agent',
       type: 'task',
@@ -231,4 +233,15 @@ describe('columnOf e isClosed', () => {
     assert.equal(isClosed('open'), false)
     assert.equal(isClosed('ready-for-agent'), false)
   })
+})
+
+test('relLinks pega só links relativos, dedup, em ordem', () => {
+  const raw = 'ver [a](../a.md) e [b](./b.md), [ext](https://x.com), [anc](#top), [abs](/c.md), [a2](../a.md)'
+  assert.deepEqual(relLinks(raw), ['../a.md', './b.md'])
+})
+
+test('cleanTitle tira o prefixo de numeração', () => {
+  assert.equal(cleanTitle('01 — Extrair o parser'), 'Extrair o parser')
+  assert.equal(cleanTitle('7 - Gaveta viva'), 'Gaveta viva')
+  assert.equal(cleanTitle('Sem número'), 'Sem número')
 })

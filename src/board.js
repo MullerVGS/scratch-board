@@ -1,7 +1,7 @@
 // O board: ler o `.scratch/` **de uma origem** e montar a projeção que a API serve.
 //
 // Esforços, issues e as arestas de bloqueio entre elas. Nada de parsing aqui — o dialeto
-// dos `.md` mora em `shared/doc.js`, que o browser também importa. Nada de HTTP: este
+// dos `.md` mora em `shared/parse.js`, que o browser também importa. Nada de HTTP: este
 // módulo não sabe que existe um servidor.
 //
 // **Uma origem por board.** `buildBoard(ns)` monta o board de *um* namespace, e nada aqui
@@ -59,7 +59,7 @@ import {
   parseBlockedBy,
   parseDoc,
   summarize,
-} from '../shared/doc.js'
+} from '../shared/parse.js'
 
 import { refIn } from './paths.js'
 

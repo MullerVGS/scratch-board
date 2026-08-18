@@ -15,7 +15,7 @@
  *   - diretório novo aparece sem reiniciar nada;
  *   - fechar um ticket que bloqueia outro **desbloqueia** o outro no board empurrado.
  *
- * E o `/shared/doc.js`: um teste de unidade nunca o pegaria — a rede do parser roda no
+ * E o `/shared/parse.js`: um teste de unidade nunca o pegaria — a rede do parser roda no
  * filesystem, não pela HTTP. Se aquela rota morrer, o `md.js` do browser falha no import,
  * e um import de módulo falha **em silêncio**: o board simplesmente não monta. A rota só é
  * defensável por HTTP, e é por isso que ela é testada aqui.
@@ -469,24 +469,24 @@ test('/api/file lê um arquivo de dentro do root', async () => {
   assert.match((await res.json()).content, /Mapa do alpha/)
 })
 
-test('o board é servível: /, /app.js e o /shared/doc.js que o browser importa', async () => {
-  // O `md.js` do browser faz `import ... from '../shared/doc.js'` — que na URL vira
-  // `/shared/doc.js`. Se essa rota morrer num corte, o import falha **em silêncio** e o
+test('o board é servível: /, /app.js e o /shared/parse.js que o browser importa', async () => {
+  // O `md.js` do browser faz `import ... from '../shared/parse.js'` — que na URL vira
+  // `/shared/parse.js`. Se essa rota morrer num corte, o import falha **em silêncio** e o
   // board não monta. Nenhum teste de unidade percebe: a rede do parser roda no filesystem.
   for (const [path, type] of [
     ['/', /text\/html/],
     ['/app.js', /javascript/],
     ['/md.js', /javascript/],
     ['/router.js', /javascript/],
-    ['/shared/doc.js', /javascript/],
+    ['/shared/parse.js', /javascript/],
   ]) {
     const res = await get(path)
     assert.equal(res.status, 200, `${path} não respondeu 200`)
     assert.match(res.headers.get('content-type'), type, `${path} veio com o tipo errado`)
   }
 
-  const doc = await (await get('/shared/doc.js')).text()
-  assert.match(doc, /export function parseDoc/, 'o /shared/doc.js não é o parser')
+  const doc = await (await get('/shared/parse.js')).text()
+  assert.match(doc, /export function parseDoc/, 'o /shared/parse.js não é o parser')
 
   // E o estático não escapa do seu root.
   assert.equal((await get('/shared/../src/server.js')).status, 404)

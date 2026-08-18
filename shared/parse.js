@@ -163,3 +163,31 @@ export const parseBlockedBy = (value) =>
   splitBlockedBy(value)
     .filter((d) => d.number)
     .map(({ number, note, raw }) => ({ number, note, raw }))
+
+const LINK = /\[[^\]]*\]\(([^)]+)\)/g
+
+/**
+ * Os alvos de link markdown **relativos** de um documento — o material bruto do grafo
+ * de links entre os arquivos de um esforço.
+ *
+ * `http(s)://`, `mailto:`, `#` (âncora) e `/` (absoluto) ficam de fora: nenhum deles é
+ * um arquivo do workspace que o grafo possa desenhar como aresta. Deduplicado, na ordem
+ * de aparição — um documento que cita o mesmo alvo duas vezes não vira duas arestas.
+ */
+export function relLinks(raw) {
+  const out = []
+  for (const m of raw.matchAll(LINK)) {
+    const target = m[1]
+    if (/^(https?:|mailto:|#|\/)/.test(target)) continue
+    if (!out.includes(target)) out.push(target)
+  }
+  return out
+}
+
+/**
+ * Tira o prefixo de numeração de issue do título — `"01 — Extrair"` vira `"Extrair"`.
+ *
+ * O `.md` repete a numeração no `# Título` para que o arquivo se leia sozinho; colar
+ * esse título num prompt não deveria carregar o número junto.
+ */
+export const cleanTitle = (s) => s.replace(/^\s*\d+\s*[—-]\s*/, '')

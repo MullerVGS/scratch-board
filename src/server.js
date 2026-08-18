@@ -2,7 +2,7 @@
 //
 // O que o board *é* mora ao lado — `board.js` monta a projeção de uma origem, `pads.js` lê
 // os scratchpads, `cache.js` guarda o board de cada origem e decide se ele mudou,
-// `watch.js` escuta o disco, `paths.js` descobre as origens, `../shared/doc.js` entende o
+// `watch.js` escuta o disco, `paths.js` descobre as origens, `../shared/parse.js` entende o
 // dialeto dos `.md`. Aqui só se responde.
 //
 // O board **não pergunta mais** ao disco a cada 5 segundos: ele é avisado. O watcher emite,
@@ -32,7 +32,7 @@ import { createHistory } from './history.js'
 const PORT = Number(process.env.PORT ?? 7777)
 const PUBLIC = resolve(import.meta.dirname, '..', 'public')
 // O parser que o browser também importa. É servido estático, sob o mesmo prefixo que o
-// `import` do `md.js` escreve (`../shared/doc.js`), para que o especificador resolva
+// `import` do `md.js` escreve (`../shared/parse.js`), para que o especificador resolva
 // igual nos dois lados: no filesystem, para o Node; na URL, para o browser.
 const SHARED = resolve(import.meta.dirname, '..', 'shared')
 

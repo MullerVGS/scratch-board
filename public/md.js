@@ -14,9 +14,9 @@
 
 // O dialeto é um só, e o parser também: o mesmo módulo que o servidor usa. O
 // especificador relativo resolve nos dois lados — no filesystem quando o Node importa
-// este arquivo (`public/md.js` → `shared/doc.js`), e na URL quando o browser o importa
-// (`/md.js` → `/shared/doc.js`, servido pelo `server.js`).
-import { HEADER_KEYS, HEADER_LINE, preambleEnd, splitBlockedBy } from '../shared/doc.js'
+// este arquivo (`public/md.js` → `shared/parse.js`), e na URL quando o browser o importa
+// (`/md.js` → `/shared/parse.js`, servido pelo `server.js`).
+import { HEADER_KEYS, HEADER_LINE, preambleEnd, splitBlockedBy } from '../shared/parse.js'
 
 /**
  * O que parece caminho de arquivo do workspace.
@@ -106,7 +106,7 @@ function inline(text) {
  * `Blocked by:` não é uma lista de números — na prática é `01 (resolvido), 08 — a
  * revisão achou defeito no decayOffline; a bancada deve testar o binário corrigido`.
  *
- * Quem quebra os fragmentos é o `shared/doc.js`, o mesmo que o servidor usa para
+ * Quem quebra os fragmentos é o `shared/parse.js`, o mesmo que o servidor usa para
  * resolver a aresta: só o número que **abre** o fragmento é referência. Aqui ele vira
  * link e o resto continua prosa. Chipar qualquer número do texto transformaria "a
  * revisão 01 achou" num link, e engolir o fragmento inteiro num chip esconderia a
