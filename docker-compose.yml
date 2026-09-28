@@ -7,13 +7,18 @@ services:
       # Não é loopback: o newt roda em container e chega ao host pelo gateway da
       # bridge (172.17.0.1), onde um bind em 127.0.0.1 não escuta.
       - "0.0.0.0:7777:7777"
+    environment:
+      # Pasta que não é `.scratch/` vira aba própria: `<aba>=<repo montado>/<subpasta>`,
+      # separadas por espaço. O repo tem que estar nos volumes abaixo; a subpasta nunca é
+      # montada direto (o inode preso, abaixo). Declaração errada derruba o start.
+      FOLDERS: pos-tarefas=pos/docs/tarefas
     volumes:
       # ---------- as origens ----------
       #
       # **Este bloco é a configuração inteira.** Cada mount sob `/workspace/repos/` é um repo,
       # a origem é o `.scratch/` **de dentro dele**, e o **nome da pasta é o nome do
-      # namespace** — não há lista em env, nem arquivo de config, nem nada a manter em dois
-      # lugares. Somar um repositório é somar uma linha aqui e recriar o container; ele
+      # namespace** — não há lista de repos em env, nem arquivo de config, nem nada a manter
+      # em dois lugares (o `FOLDERS` acima só aponta subpastas destes repos). Somar um repositório é somar uma linha aqui e recriar o container; ele
       # aparece como aba nova.
       #
       # **Monte o REPO, nunca o `.scratch/`.** Esta linha é a correção de um bug que matava o

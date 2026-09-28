@@ -17,8 +17,9 @@
  * lados, e é o que o mantém puro (`string → objeto`) e testável sem harness nenhum.
  */
 
-export const OPEN = ['needs-triage', 'needs-info', 'open', 'ready-for-agent', 'ready-for-human', 'claimed', 'partial']
-export const CLOSED = ['resolved', 'done', 'wontfix']
+// `aberta`/`em-andamento`/`concluída`: o dialeto do harness POS (`pos/docs/tarefas`).
+export const OPEN = ['needs-triage', 'needs-info', 'open', 'ready-for-agent', 'ready-for-human', 'claimed', 'partial', 'aberta', 'em-andamento']
+export const CLOSED = ['resolved', 'done', 'wontfix', 'concluída']
 export const KNOWN = [...OPEN, ...CLOSED]
 
 export const isClosed = (status) => CLOSED.includes(status)
@@ -31,6 +32,16 @@ export function normalizeStatus(value) {
 // Chaves de cabeçalho reconhecidas. Restringir a esta lista impede que uma frase
 // em prosa com dois-pontos ("Nota: ...") seja lida como estado.
 export const HEADER_KEYS = ['status', 'type', 'repo', 'blocked by', 'parent', 'label', 'prd']
+
+/** Outro nome para uma chave canônica: o harness POS escreve `Bloqueada por:`. */
+const KEY_ALIASES = { 'bloqueada por': 'blocked by' }
+
+/** A chave canônica de um nome de cabeçalho, ou `null` se ela não é estado. */
+export const headerKey = (name) => {
+  const key = name.trim().toLowerCase()
+  const canonical = KEY_ALIASES[key] ?? key
+  return HEADER_KEYS.includes(canonical) ? canonical : null
+}
 
 export const HEADER_LINE = /^([A-Za-z][A-Za-z ]*?):\s*(.*)$/
 
@@ -53,8 +64,8 @@ export function parseDoc(raw) {
   for (const line of lines.slice(0, preambleEnd(lines))) {
     const m = HEADER_LINE.exec(line)
     if (!m) continue
-    const key = m[1].trim().toLowerCase()
-    if (HEADER_KEYS.includes(key)) header[key] = m[2].trim()
+    const key = headerKey(m[1])
+    if (key) header[key] = m[2].trim()
   }
   const title = lines.find((l) => l.startsWith('# '))?.slice(2).trim()
   return { header, title }

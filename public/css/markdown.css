@@ -324,6 +324,7 @@
 /* Bloqueio já resolvido não é bloqueio: some o vermelho. */
 .issueref[data-s="resolved"],
 .issueref[data-s="done"],
+.issueref[data-s="concluída"],
 .issueref[data-s="wontfix"] {
   background: var(--panel-2);
   border-color: var(--line);

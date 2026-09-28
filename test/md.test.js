@@ -67,6 +67,12 @@ describe('`Blocked by:` — o número vira link, a prosa continua legível', () 
     assert.equal(html.match(/class="issueref"/g).length, 2)
   })
 
+  test('harness POS: `Bloqueada por:` rende o mesmo chip, com a chave como o autor a escreveu', () => {
+    const pt = renderMarkdown('Status: aberta\nBloqueada por: 01\n\n# T')
+    assert.ok(pt.includes('data-issue="01"'))
+    assert.ok(pt.includes('<span class="meta-k">bloqueada por</span>'))
+  })
+
   test('fragmento sem número que o abra vira nota, não link', () => {
     const nada = renderMarkdown('Blocked by: (nada — pode começar já)\n\n# T')
     assert.ok(!nada.includes('issueref'))

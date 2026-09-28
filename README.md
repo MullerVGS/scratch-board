@@ -20,7 +20,9 @@ O board tem os `.scratch/` que estiverem montados sob um diretório comum, e **o
 - ../vend-server:/workspace/repos/vend-server:ro
 ```
 
-Cada filho direto é um **repo**, a origem é o `.scratch/` **de dentro dele**, e o nome da pasta é o nome dela. Um mount novo vira uma aba nova no próximo start — sem env, sem arquivo de config.
+Cada filho direto é um **repo**, a origem é o `.scratch/` **de dentro dele**, e o nome da pasta é o nome dela. Um mount novo vira uma aba nova no próximo start — sem arquivo de config.
+
+Pasta que não é `.scratch/` vira aba pelo `FOLDERS`, no mesmo compose, apontando um repo já montado: `FOLDERS: pos-tarefas=pos/docs/tarefas`.
 
 **Monta-se o repo, e não o `.scratch/`** — a diferença importa. O `.scratch/` é versionado, e um `git checkout` para uma branch que não o tem apaga o diretório e o recria com outro inode; como um bind mount se prende ao inode, montá-lo direto deixava a origem **vazia para sempre**. Montado o repo, o `.scratch/` de dentro é reencontrado por caminho a cada leitura. O caminho interno do container nunca aparece na tela.
 
@@ -34,7 +36,7 @@ E o board não pergunta ao disco: ele **é avisado**. Um `fs.watch` vê o arquiv
 
 ```
 docker compose up -d      # http://localhost:7777
-node --test test/         # 123 testes, zero dependências
+node --test test/*.test.js  # 122 testes, zero dependências
 ```
 
 Node 22, **zero dependências**, frontend vanilla sem bundler. `src/`/`shared/`/`public/` são volume, sem build step — editar e `docker compose restart` basta; mexer nas origens pede `--force-recreate`.

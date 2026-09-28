@@ -16,7 +16,7 @@
 // especificador relativo resolve nos dois lados — no filesystem quando o Node importa
 // este arquivo (`public/md.js` → `shared/parse.js`), e na URL quando o browser o importa
 // (`/md.js` → `/shared/parse.js`, servido pelo `server.js`).
-import { HEADER_KEYS, HEADER_LINE, preambleEnd, splitBlockedBy } from '../shared/parse.js'
+import { HEADER_LINE, headerKey, preambleEnd, splitBlockedBy } from '../shared/parse.js'
 
 /**
  * O que parece caminho de arquivo do workspace.
@@ -135,14 +135,14 @@ function blockedValue(value) {
 function metaBlock(pairs) {
   if (!pairs.length) return ''
   const rows = pairs
-    .map(([key, value]) => {
+    .map(([key, value, label]) => {
       const v =
         key === 'blocked by'
           ? blockedValue(value)
           : key === 'status'
             ? `<span class="chip" data-s="${esc(value)}">${esc(value)}</span>`
             : inline(value)
-      return `<div class="meta-row"><span class="meta-k">${esc(key)}</span><span class="meta-v">${v}</span></div>`
+      return `<div class="meta-row"><span class="meta-k">${esc(label)}</span><span class="meta-v">${v}</span></div>`
     })
     .join('')
   return `<div class="meta">${rows}</div>`
@@ -177,9 +177,10 @@ export function renderMarkdown(raw) {
       continue
     }
     const m = HEADER_LINE.exec(t)
-    const key = m && m[1].trim().toLowerCase()
-    if (key && HEADER_KEYS.includes(key)) {
-      meta.push([key, m[2].trim()])
+    const key = m && headerKey(m[1])
+    if (key) {
+      // A chave canônica decide o render; a exibida é a que o autor escreveu.
+      meta.push([key, m[2].trim(), m[1].trim().toLowerCase()])
       consumed.add(i)
     }
   }

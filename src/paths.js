@@ -18,9 +18,14 @@
 // O diretório do **repo**, esse, o git nunca apaga. Montado ele, o `.scratch/` é resolvido
 // por *caminho* a cada leitura, e o inode novo é achado sozinho.
 //
-// **O compose é a configuração, e é a única.** Não há lista em env, nem arquivo de config
-// paralelo: um mount novo sob o mesmo diretório é uma origem nova no próximo start. Uma
+// **O compose é a configuração, e é a única.** Não há lista de repos em env, nem arquivo de
+// config paralelo: um mount novo sob o mesmo diretório é uma origem nova no próximo start. Uma
 // segunda lista seria uma segunda fonte da verdade, e as duas divergiriam.
+//
+// **A exceção é a pasta que não é `.scratch/`** (`FOLDERS`, no mesmo compose): uma subpasta de
+// um repo **já montado** vira aba própria — `pos-tarefas=pos/docs/tarefas`. Ela não repete
+// mount nenhum; diz só o dado que o mount não carrega, a subpasta. E monta-se o repo, nunca a
+// subpasta, pelo mesmo inode preso.
 //
 // Os mesmos arquivos têm dois nomes: o do container, que o board usa para ler, e o do
 // workspace, que é o único que faz sentido colar num agente. Cada item da API carrega os
@@ -77,22 +82,32 @@ export const refIn = (ns, path) => under(ns.root, ns.ref, path) ?? path
  * Roda uma vez, no `start()`: a descoberta é do startup, e um mount novo só aparece quando
  * o container é recriado. É o que o compose já garante — mudar o compose *é* recriar.
  */
-export async function discover(dir = REPOS) {
+export async function discover(dir = REPOS, folders = process.env.FOLDERS ?? '') {
   let entries = []
   try {
     entries = await readdir(dir, { withFileTypes: true })
   } catch { /* nada montado ainda, ou nunca */ }
 
-  return entries
-    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-    .map((e) => e.name)
-    .sort((a, b) => (a === HOME ? -1 : b === HOME ? 1 : a.localeCompare(b)))
-    .map((name) => ({
-      name,
-      // O que se monta é o repo; a origem é o `.scratch/` de dentro. O `root` continua sendo
-      // o que o `safePath()` prende e o que o watcher vigia, então o board segue sem
-      // enxergar um byte do repo fora do `.scratch/` — montar mais não é servir mais.
-      root: join(dir, name, '.scratch'),
-      ref: name === HOME ? '.scratch' : `${name}/.scratch`,
-    }))
+  const repos = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name)
+
+  const origins = repos.map((name) => ({
+    name,
+    // O que se monta é o repo; a origem é o `.scratch/` de dentro. O `root` continua sendo
+    // o que o `safePath()` prende e o que o watcher vigia, então o board segue sem
+    // enxergar um byte do repo fora do `.scratch/` — montar mais não é servir mais.
+    root: join(dir, name, '.scratch'),
+    ref: name === HOME ? '.scratch' : `${name}/.scratch`,
+  }))
+
+  // Declaração errada derruba o start: calada, ela viraria aba sumida, sobrescrita ou vazia
+  // para sempre. Só a existência do **repo** é conferida — a da subpasta, não (o checkout).
+  for (const entry of folders.split(/[\s,]+/).filter(Boolean)) {
+    const [, name, repo, sub] = /^([^=/]+)=([^/]+)\/(.+)$/.exec(entry) ?? []
+    if (!name) throw new Error(`FOLDERS: "${entry}" não é <aba>=<repo>/<subpasta>`)
+    if (origins.some((o) => o.name === name)) throw new Error(`FOLDERS: a aba "${name}" já existe`)
+    if (!repos.includes(repo)) throw new Error(`FOLDERS: o repo "${repo}" de "${entry}" não está montado`)
+    origins.push({ name, root: join(dir, repo, sub), ref: repo === HOME ? sub : `${repo}/${sub}` })
+  }
+
+  return origins.sort((a, b) => (a.name === HOME ? -1 : b.name === HOME ? 1 : a.name.localeCompare(b.name)))
 }

@@ -151,6 +151,7 @@ button.icon:hover {
 }
 
 .chip[data-s="open"],
+.chip[data-s="aberta"],
 .chip[data-s^="ready"] {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
@@ -158,6 +159,7 @@ button.icon:hover {
 }
 
 .chip[data-s="claimed"],
+.chip[data-s="em-andamento"],
 .chip[data-s="partial"] {
   color: var(--violet);
   border-color: color-mix(in srgb, var(--violet) 32%, transparent);
@@ -165,6 +167,7 @@ button.icon:hover {
 }
 
 .chip[data-s="resolved"],
+.chip[data-s="concluída"],
 .chip[data-s="done"] {
   color: var(--green);
   border-color: color-mix(in srgb, var(--green) 32%, transparent);

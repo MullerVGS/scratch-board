@@ -77,6 +77,11 @@ describe('parseDoc — os três dialetos de cabeçalho', () => {
     assert.equal(parseDoc('Status: claimed\n\ntexto solto').title, undefined)
   })
 
+  test('harness POS: `Bloqueada por:` é o `blocked by`', () => {
+    const { header } = parseDoc('Status: aberta\nBloqueada por: 01\n\n# 02 — T')
+    assert.deepEqual(header, { status: 'aberta', 'blocked by': '01' })
+  })
+
   test('a chave é case-insensitive e o valor é trimado', () => {
     assert.equal(parseDoc('STATUS:   claimed   \n\n# T').header.status, 'claimed')
   })
@@ -152,6 +157,12 @@ describe('normalizeStatus — vocabulário novo aparece, não some', () => {
     assert.equal(normalizeStatus('open'), 'open')
     assert.equal(normalizeStatus(' Open '), 'open')
   })
+
+  test('o dialeto do harness POS (`pos/docs/tarefas`) é vocabulário, não desconhecido', () => {
+    assert.equal(normalizeStatus('aberta'), 'aberta')
+    assert.equal(normalizeStatus('Em-andamento'), 'em-andamento')
+    assert.equal(normalizeStatus('Concluída'), 'concluída')
+  })
 })
 
 describe('isClosed', () => {
@@ -162,6 +173,12 @@ describe('isClosed', () => {
     assert.equal(isClosed('claimed'), false)
     assert.equal(isClosed('open'), false)
     assert.equal(isClosed('ready-for-agent'), false)
+  })
+
+  test('harness POS: só `concluída` fecha', () => {
+    assert.equal(isClosed('concluída'), true)
+    assert.equal(isClosed('aberta'), false)
+    assert.equal(isClosed('em-andamento'), false)
   })
 })
 

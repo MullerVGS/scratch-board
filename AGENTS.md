@@ -17,7 +17,7 @@ O board tem **as origens que estiverem montadas**, cada uma um `.scratch/` compl
 - ../vend-server:/workspace/repos/vend-server:ro
 ```
 
-Cada filho direto de `/workspace/repos/` é um **repo**, a origem é o `.scratch/` **de dentro dele**, e o nome da pasta é o nome da origem. Um `readdir` no `start()` descobre tudo — sem env, sem lista, sem registro no código. Mount novo, aba nova, container recriado (`--force-recreate`).
+Cada filho direto de `/workspace/repos/` é um **repo**, a origem é o `.scratch/` **de dentro dele**, e o nome da pasta é o nome da origem. Um `readdir` no `start()` descobre os repos — sem lista de repos em env, sem registro no código. Mount novo, aba nova, container recriado (`--force-recreate`).
 
 ### Monte o repo, nunca o `.scratch/`
 
@@ -32,6 +32,7 @@ O diretório do **repo** o git nunca apaga: montado ele, o `.scratch/` é resolv
 - **O nome decide o `ref`** que o humano copia (abaixo): nomeie a pasta do mount como o caminho do repo a partir de `/root/projetos`.
 - **Watcher, hash e varredura são por origem** (`createCache(ns)` é fábrica): sem isso, duas origens dividiriam o mesmo hash e a segunda a escrever seria **suprimida** pela primeira. Não há supressão cruzada.
 - **Uma conexão SSE, N origens.** Cada evento carrega `ns` e **só o board daquela origem**; o cliente guarda sempre, redesenha só se for a aba na tela. Trocar de aba não faz request de board — ele já está na mão (medido: **0 request** de `/api/board` ao trocar; o grafo da pasta-raiz é buscado sob demanda). O snapshot de conexão manda todas as origens, uma por frame.
+- **Subpasta que não é `.scratch/` vira aba via `FOLDERS`** (`environment` do mesmo compose): `pos-tarefas=pos/docs/tarefas`. Aponta um repo **já montado** — nunca se monta a subpasta, pelo mesmo inode. `root` = a subpasta, `ref` = `pos/docs/tarefas/...`. Só a existência do repo é conferida (a da subpasta, não: checkout); formato errado, aba repetida ou repo não montado **derrubam o start** (`discover()`).
 - **Vazia e quebrada são estados diferentes.** Um `.scratch/` sem arquivo mostra o vazio; uma origem que o disco recusou mostra o erro em vermelho e a aba troca a contagem por `!` (`errorTree()`). A falha fica contida na origem.
 
 ## O que o servidor projeta
@@ -100,11 +101,12 @@ O `EventSource` reconecta sozinho, e o snapshot manda o board inteiro relido —
 `parseDoc()`, `normalizeStatus()`, `KNOWN`, `parseBlockedBy()`/`splitBlockedBy()`, `relLinks()` — um arquivo só, importado pelo servidor **e** pelo browser (servido em `/shared/`). É **puro** (`string → objeto`) e **não pode tocar `node:` nem o DOM**. Já existiu duplicado (uma cópia no servidor, outra no cliente), e as cópias divergiram — o servidor era a errada.
 
 - **Três dialetos de cabeçalho.** As chaves `Chave: valor` podem vir **antes** do `# Título` (wayfinder) ou **depois** (issue tracker). `parseDoc()` varre o **preâmbulo inteiro** (até o primeiro `## `) e só aceita as chaves de `HEADER_KEYS`, para que prosa com dois-pontos não vire estado. Há `Status:` em corpo de issue; a fronteira do `## ` é o que o barra.
+- **Chave com outro nome** (`KEY_ALIASES`, `headerKey()`): `Bloqueada por:` (harness POS) é `blocked by` — mesmo grafo, mesmo chip; o viewer exibe a chave como escrita.
 - **`Blocked by:` traz prosa.** Na prática: `01 (resolvido), 08 — a revisão achou defeito…`. Só o número que **abre** cada fragmento separado por vírgula é referência; o resto é a justificativa. `parseBlockedBy()` quebra em `{ number, note }`; um fragmento sem número que o abra não vira aresta.
 
 ## Vocabulário de status
 
-Canônicos (`docs/agents/triage-labels.md`): `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Do wayfinder: `open`, `claimed`, `resolved`. Na prática: `done`, `partial`. Um status fora da lista é exibido com **`?` e em vermelho** — vocabulário novo deve **aparecer**, não sumir num balde de "outros". O selo é montado num só lugar (`statusChip()`, `public/dom.js`), consumido pela árvore e pelo grafo.
+Canônicos (`docs/agents/triage-labels.md`): `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Do wayfinder: `open`, `claimed`, `resolved`. Na prática: `done`, `partial`. Do harness POS (`pos/docs/tarefas`): `aberta`, `em-andamento`, `concluída` (fecha). Um status fora da lista é exibido com **`?` e em vermelho** — vocabulário novo deve **aparecer**, não sumir num balde de "outros". O selo é montado num só lugar (`statusChip()`, `public/dom.js`), consumido pela árvore e pelo grafo.
 
 ## Os módulos
 
@@ -146,7 +148,7 @@ Node 22, **zero dependências**, frontend vanilla sem bundler. `node:http`/`node
 
 ```
 docker compose up -d      # http://localhost:7777
-node --test test/         # 123 testes, zero dependências
+node --test test/*.test.js  # 122 testes, zero dependências
 ```
 
 `src/`/`shared/`/`public/` são volume, sem build step — editar e `docker compose restart` basta. **Mexer nas origens é a exceção**: descobertas no `start()`, pedem `--force-recreate`.

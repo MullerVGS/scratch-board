@@ -35,6 +35,14 @@ async function put(ns, rel, body) {
   return path
 }
 
+/** Escreve na origem de subpasta: `docs/tarefas` do vend-server, declarada em `FOLDERS`. */
+async function putTarefa(rel, body) {
+  const path = join(mounts, 'vend-server', 'docs', 'tarefas', rel)
+  await mkdir(join(path, '..'), { recursive: true })
+  await writeFile(path, body)
+  return path
+}
+
 const issue = (title, status, extra = '') =>
   `Status: ${status}\nType: task\n${extra}\n# ${title}\n\nUm corpo qualquer.\n`
 
@@ -113,6 +121,7 @@ function find(nodes, name) {
 before(async () => {
   mounts = await mkdtemp(join(tmpdir(), 'board-ns-'))
   process.env.REPOS_DIR = mounts
+  process.env.FOLDERS = 'vend-tarefas=vend-server/docs/tarefas'
 
   // A origem de casa, e um esforço nela.
   await put('projetos', 'comum/map.md', '# O esforço de casa\n\nO primeiro parágrafo.\n')
@@ -132,6 +141,11 @@ before(async () => {
   await mkdir(join(mounts, 'quebrada'), { recursive: true })
   await writeFile(join(mounts, 'quebrada', '.scratch'), 'isto devia ser um diretório')
 
+  // Uma subpasta do repo já montado como origem própria, no dialeto do harness POS.
+  await putTarefa('presenca/spec.md', '# Presença\n\nA spec.\n')
+  await putTarefa('presenca/issues/01-registro.md', 'Status: concluída\n\n# 01 — Registro\n')
+  await putTarefa('presenca/issues/02-operador.md', 'Status: aberta\nBloqueada por: 01\n\n# 02 — Operador\n')
+
   const mod = await import('../src/server.js')
   server = await mod.start(0)
   base = `http://127.0.0.1:${server.port}`
@@ -147,7 +161,7 @@ test('cada subpasta do diretório comum é uma origem: casa primeiro, o resto em
   // isso que o teste não passa lista nenhuma: ele cria pastas.
   assert.deepEqual(
     server.namespaces.map((ns) => ns.name),
-    ['projetos', 'quebrada', 'vazia', 'vend-server'],
+    ['projetos', 'quebrada', 'vazia', 'vend-server', 'vend-tarefas'],
   )
 })
 
@@ -294,7 +308,7 @@ test('o snapshot de conexão traz TODAS as origens, uma por frame — quem recon
 
     assert.deepEqual(
       frames.map((f) => f.ns),
-      ['projetos', 'quebrada', 'vazia', 'vend-server'],
+      ['projetos', 'quebrada', 'vazia', 'vend-server', 'vend-tarefas'],
       'o snapshot não mandou uma origem por frame, na ordem das abas',
     )
     for (const f of frames) {
@@ -328,4 +342,44 @@ test('o /api/file alcança as duas origens, e continua recusando o que está for
   // E o diretório comum **não** é um root: ele contém as origens, mas não é uma delas.
   const comum = await fetch(`${base}/api/file?path=${encodeURIComponent(join(mounts, 'qualquer.md'))}`)
   assert.equal(comum.status, 400)
+})
+
+test('FOLDERS: a subpasta de um repo montado é uma origem com raiz nela, isolada do `.scratch/` dele', async () => {
+  const tarefas = await boardOf('vend-tarefas')
+  const vend = await boardOf('vend-server')
+
+  assert.equal(tarefas.ref, 'vend-server/docs/tarefas')
+  assert.equal(find(tarefas.tree, 'presenca').ref, 'vend-server/docs/tarefas/presenca')
+  assert.equal(find(tarefas.tree, '02-operador.md').status, 'aberta')
+  assert.equal(find(tarefas.tree, 'comum'), null, 'o `.scratch/` do repo vazou para a subpasta')
+  assert.equal(find(vend.tree, 'presenca'), null, 'a subpasta vazou para o `.scratch/` do repo')
+
+  const res = await fetch(`${base}/api/file?path=${encodeURIComponent(find(tarefas.tree, 'spec.md').path)}`)
+  assert.equal(res.status, 200)
+  assert.match(await res.text(), /A spec/)
+})
+
+test('FOLDERS: `Bloqueada por:` desenha o grafo de dependências da origem de subpasta', async () => {
+  const folder = find((await boardOf('vend-tarefas')).tree, 'presenca').path
+  const g = await (await fetch(`${base}/api/graph?ns=vend-tarefas&path=${encodeURIComponent(folder)}`)).json()
+
+  assert.equal(g.mode, 'deps')
+  assert.equal(g.edges.length, 1)
+  assert.equal(g.nodes.find((n) => n.id === g.edges[0].from).name, '01-registro.md')
+  assert.equal(g.nodes.find((n) => n.id === g.edges[0].to).name, '02-operador.md')
+})
+
+test('FOLDERS mal declarado não sobe calado', async () => {
+  const { discover } = await import('../src/paths.js')
+  // Cada um destes, calado, seria uma mentira: aba sumida, aba sobrescrita, aba vazia para sempre.
+  await assert.rejects(discover(mounts, 'sem-igual'), /FOLDERS/)
+  await assert.rejects(discover(mounts, 'x=vend-server'), /FOLDERS/)
+  await assert.rejects(discover(mounts, 'vend-server=projetos/docs'), /já existe/)
+  await assert.rejects(discover(mounts, 'x=nao-montado/docs/tarefas'), /não está montado/)
+})
+
+test('FOLDERS na origem de casa: o ref é nu, como o `.scratch/` dela', async () => {
+  const { discover } = await import('../src/paths.js')
+  const origins = await discover(mounts, 'agentes=projetos/docs/agents')
+  assert.equal(origins.find((o) => o.name === 'agentes').ref, 'docs/agents')
 })
