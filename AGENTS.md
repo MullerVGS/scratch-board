@@ -170,6 +170,18 @@ Testes — as costuras caem onde o código é puro ou onde ele fala HTTP (não h
 
 Fora de teste, deliberadamente: DOM, CSS, interação do viewer, arrasto do grafo — verificados **dirigindo o app de verdade** (chromium por CDP), não com um DOM falso.
 
+## `scratch-api`: a peça que escreve
+
+Serviço à parte no mesmo repo (`src/api.js` + `src/keys.js`, container `scratch-api`, `:7778`), para agentes fora da máquina (sessões de nuvem). O board continua sem escrever: a API é outro processo, com outro mount.
+
+- **Origens:** mesmo `discover()`/`FOLDERS` do board. Pasta que não é git monta **só o `.scratch/`** em rw (`../pessoal/.scratch:/workspace/repos/pessoal/.scratch`) — nada além dele existe para a API. Repo git monta o repo (inode), e a contenção vira o `resolveIn()` (`..`, absoluto, oculto, symlink para fora → 400).
+- **Rotas:** `GET /api/origins`, `GET /api/tree?ns=` (árvore do board sem `path`), `GET /api/file?ns=&path=<rel>` (corpo + ETag sha1), `PUT /api/file` com `If-Match: <etag>` ou `If-None-Match: *` (divergiu → 412). Escrita atômica (oculto + `rename`), só `.md/.txt/.json` ≤ 1 MB. Sem apagar/mover. `/healthz` sem auth.
+- **Chaves:** `docker exec scratch-api node src/keys.js issue --origins pessoal --ttl 24h --label x` · `list` · `revoke <id>|--all`. Escopo = origens; TTL máx 7d; `keys.json` guarda só sha256; revogar vale na próxima requisição.
+- **Header:** chave em `X-Scratch-Token` (ou `Authorization: Bearer`, local). Atrás da borda o `Authorization` é do Pangolin.
+- **Borda:** `api-scratch.duenas.dev.br`, resource 21 (site 1), SSO off, header auth `Basic` (segredo em `.edge-auth.env`, gitignored). Sem Basic = `Unauthorized` do Pangolin; sem token = JSON 401 da API.
+- **Auditoria:** cada escrita → linha JSON em `/state/audit.log` (volume `scratch-api-state`) + stdout.
+- **Skill** `scratch` (conta claude.ai) em `skill/scratch/SKILL.md`: reenviar o zip ao mudar.
+
 ## Fronteira
 
 O board mecaniza o que é determinístico — ler o disco, projetar a árvore, renderizar o documento. O que exige julgamento é das skills, e **muda os `.md`**. O board não muda `.md`: ele lê, e só.
