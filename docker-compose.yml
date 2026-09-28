@@ -48,6 +48,8 @@ services:
       # só, então o ref sai `tradutor-harness/.scratch/...` — válido porque existe um
       # symlink `/root/projetos/tradutor-harness` → `pessoal/tradutor-harness`.
       - ../pessoal/tradutor-harness:/workspace/repos/tradutor-harness:ro
+      # `pessoal/` não é repo git: o `.scratch/` dele é o tracker dos projetos pessoais.
+      - ../pessoal:/workspace/repos/pessoal:ro
 
       # Iterar sem rebuild: o servidor não tem build step. Os três são montados como
       # **diretório**, nunca arquivo a arquivo: módulo novo em `src/` passa a valer no
@@ -58,3 +60,34 @@ services:
       # o recebe por `/shared/parse.js`.
       - ./shared:/app/shared:ro
       - ./public:/app/public:ro
+
+  # A única peça que escreve: leitura e escrita dos `.scratch/` para agentes fora da máquina,
+  # com chave temporária (`src/keys.js`). Mesma descoberta do board; o que muda é o mount.
+  scratch-api:
+    build: .
+    container_name: scratch-api
+    restart: unless-stopped
+    command: ["node", "src/api.js"]
+    ports:
+      - "0.0.0.0:7778:7778"
+    environment:
+      PORT: 7778
+      STATE_DIR: /state
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7778/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      # ---------- as origens, em rw ----------
+      #
+      # Pasta que não é git: monte **só o `.scratch/`** — nada além dele existe para a API.
+      # Repo git: monte o repo (o inode preso do checkout, acima), e a contenção vira código.
+      - ../pessoal/.scratch:/workspace/repos/pessoal/.scratch
+      # `keys.json` (só hashes) e `audit.log`.
+      - scratch-api-state:/state
+      - ./src:/app/src:ro
+      - ./shared:/app/shared:ro
+
+volumes:
+  scratch-api-state:
